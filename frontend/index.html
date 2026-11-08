@@ -57,10 +57,10 @@
     <!-- Right Controls: NTFY & Floater -->
     <div class="flex flex-wrap items-center gap-3">
       <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl text-xs mono">
-        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 pulse-dot" id="ws-indicator"></span>
-        <span id="ws-status" class="text-slate-300 font-semibold">LIVE CONNECTED</span>
+        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400" id="ws-indicator"></span>
+        <span id="ws-status" class="text-slate-300 font-semibold">GATEWAY: ONLINE (INDSTOCKS AUTHENTICATED)</span>
         <span class="text-slate-600">|</span>
-        <span id="last-update" class="text-slate-400">--:--:--</span>
+        <span id="last-update" class="text-emerald-400 font-bold">--:--:-- IST</span>
       </div>
 
       <!-- NTFY Quick Trigger & Topic Config -->
@@ -537,8 +537,8 @@
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
-        document.getElementById('ws-status').textContent = 'LIVE CONNECTED';
-        document.getElementById('ws-indicator').className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 pulse-dot';
+        document.getElementById('ws-status').textContent = 'GATEWAY: ONLINE (INDSTOCKS AUTHENTICATED)';
+        document.getElementById('ws-indicator').className = 'w-2.5 h-2.5 rounded-full bg-emerald-400';
       };
 
       ws.onmessage = (event) => {
@@ -551,8 +551,8 @@
       };
 
       ws.onclose = () => {
-        document.getElementById('ws-status').textContent = 'RECONNECTING...';
-        document.getElementById('ws-indicator').className = 'w-2.5 h-2.5 rounded-full bg-amber-400';
+        document.getElementById('ws-status').textContent = 'GATEWAY: RECONNECTING...';
+        document.getElementById('ws-indicator').className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse';
         setTimeout(initWebSocket, 3000);
       };
 
@@ -563,10 +563,10 @@
       if (!data) return;
       latestData = data;
       const timeStr = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
-      document.getElementById('last-update').textContent = timeStr;
-      document.getElementById('trend-time').textContent = timeStr;
+      document.getElementById('last-update').textContent = timeStr + ' IST';
+      document.getElementById('trend-time').textContent = timeStr + ' IST';
 
-      // Dynamic Market Status Pill
+      // Dynamic Institutional Exchange Status Pill
       const statusPill = document.getElementById('market-status-pill');
       const now = new Date();
       // Calculate IST hours and minutes
@@ -577,17 +577,20 @@
       const istDay = istDate.getDay(); // 0 is Sunday, 6 is Saturday
 
       if (istDay === 0 || istDay === 6) {
-        statusPill.textContent = 'MARKET CLOSED (WEEKEND)';
-        statusPill.className = 'text-xs px-2.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono';
+        statusPill.textContent = 'NSE/BSE: CLOSED (WEEKEND)';
+        statusPill.className = 'text-xs px-2.5 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-slate-400 font-mono';
       } else if (istHours === 15 && istMinutes >= 10 && istMinutes <= 30) {
-        statusPill.textContent = '🟢 LIVE BTST WINDOW (3:10 - 3:30 PM)';
+        statusPill.textContent = '🔥 NSE/BSE: BTST POWER WINDOW (3:10 - 3:30 PM)';
         statusPill.className = 'text-xs px-2.5 py-0.5 rounded bg-emerald-950 border border-emerald-500/50 text-emerald-300 font-mono font-bold animate-pulse';
       } else if ((istHours > 9 || (istHours === 9 && istMinutes >= 15)) && (istHours < 15 || (istHours === 15 && istMinutes <= 30))) {
-        statusPill.textContent = '🟢 LIVE MARKET ACTIVE';
+        statusPill.textContent = '🟢 NSE/BSE: REGULAR SESSION (09:15 - 15:30 IST)';
         statusPill.className = 'text-xs px-2.5 py-0.5 rounded bg-emerald-950 border border-emerald-500/50 text-emerald-300 font-mono font-bold';
+      } else if (istHours === 9 && istMinutes < 15) {
+        statusPill.textContent = 'NSE/BSE: PRE-MARKET (09:00 - 09:15 IST)';
+        statusPill.className = 'text-xs px-2.5 py-0.5 rounded bg-amber-950 border border-amber-500/40 text-amber-300 font-mono';
       } else {
-        statusPill.textContent = 'MARKET CLOSED (OVERNIGHT)';
-        statusPill.className = 'text-xs px-2.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono';
+        statusPill.textContent = 'NSE/BSE: CLOSED (POST-MARKET)';
+        statusPill.className = 'text-xs px-2.5 py-0.5 rounded bg-slate-800/90 border border-slate-700 text-slate-400 font-mono';
       }
 
       // -----------------------------------------------------------------
