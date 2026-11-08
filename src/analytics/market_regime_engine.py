@@ -46,6 +46,7 @@ class MarketRegimeEngine:
 
         # Extract Benchmark metrics
         nifty_wabi = nifty_breadth.get("wabi_score", 0.0)
+        sensex_wabi = sensex_breadth.get("wabi_score", 0.0)
         nifty_above_pct = nifty_breadth.get("stocks_above_vwap_pct", 0.0)
         nifty_thrust = nifty_breadth.get("volume_thrust_pct", 50.0)
         nifty_hw = nifty_breadth.get("heavyweights", {})
@@ -60,12 +61,87 @@ class MarketRegimeEngine:
         bm_adr = bm_data.get("advance_decline_ratio", 1.0)
         bm_total = bm_data.get("total_stocks", 2266)
 
+        # Extract Segment & Derivatives Confluence
+        segs = broad_market.get("segments", {}) if broad_market else {}
+        n500 = segs.get("nifty_500", {})
+        n500_adv = int(n500.get("advances") or 228)
+        n500_dec = int(n500.get("declines") or 267)
+
+        vix_info = broad_market.get("vix", {}) if broad_market else {}
+        deriv_info = broad_market.get("derivatives", {}) if broad_market else {}
+        vix_val = float(vix_info.get("value") or 15.5)
+        vix_chg_pct = float(vix_info.get("change_pct") or 0.0)
+        pcr_val = float(deriv_info.get("index_options_pcr") or 0.85)
+        fut_basis = float(deriv_info.get("nifty_futures_basis") or 0.0)
+
         # -------------------------------------------------------------
-        # 1. MARKET TREND CLASSIFICATION
+        # 1. INSTITUTIONAL COMPOSITE TREND INDEX (CTI) CALCULATION (-100 to +100)
         # -------------------------------------------------------------
-        # Is there a severe divergence between bluechip index and the broader market?
+        raw_score = 0.0
+
+        # Pillar 1: Bluechip Benchmark Breadth (Max 40 points)
+        raw_score += (nifty_wabi * 20.0)
+        raw_score += (sensex_wabi * 10.0)
+        hw_points_map = {5: 10.0, 4: 6.0, 3: 0.0, 2: -6.0, 1: -10.0, 0: -10.0}
+        raw_score += hw_points_map.get(nifty_hw_above, 0.0)
+
+        # Pillar 2: Broad Market Participation (Max 35 points)
+        if bm_adr >= 2.0:
+            raw_score += 25.0
+        elif bm_adr >= 1.5:
+            raw_score += 20.0
+        elif bm_adr >= 1.2:
+            raw_score += 12.0
+        elif bm_adr >= 1.0:
+            raw_score += 5.0
+        elif bm_adr >= 0.85:
+            raw_score -= 5.0
+        elif bm_adr >= 0.65:
+            raw_score -= 12.0
+        elif bm_adr >= 0.50:
+            raw_score -= 20.0
+        else:
+            raw_score -= 25.0
+
+        if n500_adv >= 300:
+            raw_score += 10.0
+        elif n500_dec >= 300:
+            raw_score -= 10.0
+
+        # Pillar 3: Derivatives & Volatility Confluence (Max 25 points)
+        if pcr_val >= 1.30:
+            raw_score += 10.0
+        elif pcr_val >= 1.15:
+            raw_score += 5.0
+        elif pcr_val <= 0.70:
+            raw_score -= 10.0
+        elif pcr_val <= 0.85:
+            raw_score -= 5.0
+
+        if nifty_chg >= 0:
+            if vix_val <= 16.0 and vix_chg_pct <= 0:
+                raw_score += 10.0  # Calm institutional accumulation
+            elif vix_chg_pct >= 5.0:
+                raw_score -= 10.0  # Volatility spike divergence (hedging alert)
+        else:
+            if vix_chg_pct >= 5.0:
+                raw_score -= 10.0  # Panic liquidation
+            elif vix_chg_pct <= 0:
+                raw_score -= 5.0   # Orderly decline
+
+        if fut_basis >= 10.0:
+            raw_score += 5.0   # Institutional futures premium
+        elif fut_basis <= -15.0:
+            raw_score -= 5.0   # Cautious futures discount
+
+        score = max(-100, min(100, round(raw_score)))
+
+        # -------------------------------------------------------------
+        # 2. DIVERGENCE VETO GUARD & REGIME CLASSIFICATION
+        # -------------------------------------------------------------
+        # Is there a severe divergence between bluechips and the wider exchange?
         is_divergence = False
-        if nifty_wabi >= 0.30 and (bm_adr < 0.85 or bm_dec > bm_adv):
+        if (nifty_wabi >= 0.25 or sensex_wabi >= 0.25) and (bm_adr < 0.85 or bm_dec > bm_adv + 300):
             is_divergence = True
 
         trend_code = "CHOPPY"
@@ -78,48 +154,47 @@ class MarketRegimeEngine:
             trend_label = "CHOPPY / DIVERGENT (NARROW BLUECHIP RALLY)"
             trend_color = "amber"
             trend_description = (
-                f"Nifty 50 appears green ({nifty_above_pct:.0f}% > VWAP), but 60%+ of all NSE stocks are declining "
-                f"({bm_dec} Declines vs {bm_adv} Advances, ADR: {bm_adr}:1). The rally is narrow and artificial."
+                f"Nifty 50 appears green ({nifty_above_pct:.0f}% > VWAP), but across the full exchange {bm_dec} stocks are falling "
+                f"vs {bm_adv} advancing (ADR: {bm_adr}:1). Composite Score: {score:+d}/100. The rally is concentrated in a few heavyweights."
             )
-        elif bm_adr >= 1.5 and nifty_wabi >= 0.45 and nifty_above_pct >= 65.0 and nifty_hw_above >= 4:
+        elif score >= 55:
             trend_code = "STRONG_UPTREND"
-            trend_label = "STRONG UPTREND"
+            trend_label = "STRONG UPTREND (ALL-PILLAR CONFLUENCE)"
             trend_color = "emerald"
             trend_description = (
-                f"High-conviction broad market expansion. All-NSE Advances dominate ({bm_adv} Adv vs {bm_dec} Dec, ADR: {bm_adr}:1), "
-                f"and {nifty_hw_above}/5 Nifty heavyweights are firmly above Day VWAP."
+                f"High-conviction broad market expansion (Score: {score:+d}/100). Advances lead declines ({bm_adv} Adv vs {bm_dec} Dec, ADR: {bm_adr}:1), "
+                f"{nifty_hw_above}/5 heavyweights are above Day VWAP, and derivatives PCR ({pcr_val:.2f}) confirms institutional floor."
             )
-        elif bm_adr >= 1.1 and nifty_wabi >= 0.20 and nifty_above_pct >= 55.0:
+        elif score >= 20:
             trend_code = "UPTREND"
-            trend_label = "UPTREND (MODERATE)"
+            trend_label = "UPTREND (MODERATE BULL BIAS)"
             trend_color = "emerald"
             trend_description = (
-                f"Positive upward bias. Advances lead declines across exchange (ADR: {bm_adr}:1), "
-                f"with benchmark constituents holding above intraday VWAP."
+                f"Positive upward bias (Score: {score:+d}/100). Benchmark constituents hold above Day VWAP with supportive market breadth (ADR: {bm_adr}:1)."
             )
-        elif bm_adr <= 0.60 and nifty_wabi <= -0.45 and nifty_above_pct <= 35.0 and nifty_hw_above <= 1:
+        elif score <= -55:
             trend_code = "STRONG_DOWNTREND"
-            trend_label = "STRONG DOWNTREND"
+            trend_label = "STRONG DOWNTREND (ALL-MARKET LIQUIDATION)"
             trend_color = "rose"
             trend_description = (
-                f"High-conviction institutional liquidation. Declines crush advances across exchange ({bm_dec} Dec vs {bm_adv} Adv, ADR: {bm_adr}:1), "
-                f"and bluechip heavyweights are broken below Day VWAP."
+                f"High-conviction institutional liquidation (Score: {score:+d}/100). Declines overwhelm advances across exchange ({bm_dec} Dec vs {bm_adv} Adv, ADR: {bm_adr}:1), "
+                f"and bluechips trade broken below Day VWAP."
             )
-        elif bm_adr <= 0.85 and nifty_wabi <= -0.20 and nifty_above_pct <= 45.0:
+        elif score <= -20:
             trend_code = "DOWNTREND"
-            trend_label = "DOWNTREND (MODERATE)"
+            trend_label = "DOWNTREND (BEAR DISTRIBUTION)"
             trend_color = "rose"
             trend_description = (
-                f"Bearish pressure dominant. Declines lead advances across the wider exchange (ADR: {bm_adr}:1), "
-                f"with selling pressure prevailing in key sectors."
+                f"Bearish distribution dominant (Score: {score:+d}/100). Declines lead advances across the wider exchange (ADR: {bm_adr}:1), "
+                f"with persistent selling pressure in benchmark constituents."
             )
         else:
             trend_code = "CHOPPY"
-            trend_label = "CHOPPY / RANGEBOUND"
+            trend_label = "CHOPPY / RANGEBOUND (SIDEWAYS)"
             trend_color = "amber"
             trend_description = (
-                f"Market is caught in a sideways tug-of-war without institutional thrust. "
-                f"Breadth is evenly split (ADR: {bm_adr}:1). High risk of intraday whipsaw."
+                f"Market is caught in an equilibrium tug-of-war without institutional thrust (Score: {score:+d}/100). "
+                f"Breadth is evenly split (ADR: {bm_adr}:1). High risk of intraday false breakouts."
             )
 
         # -------------------------------------------------------------
@@ -240,6 +315,8 @@ class MarketRegimeEngine:
             "trend": {
                 "code": trend_code,
                 "label": trend_label,
+                "score": score,
+                "score_label": f"{score:+d} / 100",
                 "color": trend_color,
                 "description": trend_description,
                 "is_divergence": is_divergence,

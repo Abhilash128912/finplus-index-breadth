@@ -90,6 +90,9 @@
           <span class="text-xs px-2.5 py-0.5 rounded font-mono font-black uppercase bg-amber-500 text-black">
             OVERALL MARKET TREND REGIME
           </span>
+          <span id="trend-score-badge" class="text-xs px-2 py-0.5 rounded font-mono font-black bg-amber-950 border border-amber-500 text-amber-300">
+            CTI SCORE: -6 / 100
+          </span>
           <span class="text-xs text-slate-400 font-mono" id="trend-time">--:-- IST</span>
         </div>
         <div class="text-xs text-slate-400 font-mono">
@@ -586,6 +589,16 @@
       if (trend.label) {
         document.getElementById('trend-headline').textContent = trend.label;
         document.getElementById('trend-description').textContent = trend.description;
+
+        const scoreElem = document.getElementById('trend-score-badge');
+        if (scoreElem && trend.score_label) {
+          scoreElem.textContent = `CTI SCORE: ${trend.score_label}`;
+          const sc = Number(trend.score || 0);
+          scoreElem.className = `text-xs px-2 py-0.5 rounded font-mono font-black border ${
+            sc >= 20 ? 'bg-emerald-950 border-emerald-500 text-emerald-300' :
+            (sc <= -20 ? 'bg-rose-950 border-rose-500 text-rose-300' : 'bg-amber-950 border-amber-500 text-amber-300')
+          }`;
+        }
 
         const trendCard = document.getElementById('trend-main-card');
         if (trend.color === 'emerald') {

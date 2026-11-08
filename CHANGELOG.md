@@ -46,3 +46,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **3:10 PM BTST Binary Radar:** Strict 5-gate institutional model with mandatory Broad Market Veto Gate.
 - **Dual-Topic NTFY Dispatcher:** Dispatches to `Finplus-Delta` and `Finplus-Breadth`.
 - **Dockerized Cloud Deployment:** Configured for Render cloud deployment.
+
