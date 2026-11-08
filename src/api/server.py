@@ -87,9 +87,7 @@ scheduler.register_listener(on_new_snapshot)
 async def startup_event() -> None:
     """Launches the background market poller upon server boot."""
     logger.info("Booting FinPlus+ Index Breadth Web Gateway...")
-    # Initial synchronous pull to populate state immediately
-    scheduler.refresh_breadth()
-    # Launch background loop
+    # Launch background loop (executes first refresh asynchronously via worker thread)
     asyncio.create_task(scheduler.run_loop())
 
 

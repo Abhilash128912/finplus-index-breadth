@@ -117,7 +117,8 @@ class MarketScheduler:
 
         while self._running:
             try:
-                snapshot = self.refresh_breadth()
+                # Offload blocking HTTP requests (NSE scrape + INDstocks batch quotes) to worker thread
+                snapshot = await asyncio.to_thread(self.refresh_breadth)
                 now = datetime.datetime.now(tz=IST)
                 hour = now.hour
                 minute = now.minute

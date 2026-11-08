@@ -86,3 +86,45 @@ flowchart TD
 | :--- | :--- | :--- | :--- |
 | **Intraday Trend & Directives Pulse** | Every 30 Mins (09:30 to 15:00) | **Intraday Trading Decisions** | Market Trend (`Uptrend`/`Choppy`/`Downtrend`), Equities Action, Options Action, All-NSE A/D |
 | **End-of-Day BTST Alert** | 3:15 PM & 3:25 PM | **Overnight Index Position** | `🎯 BTST QUALIFIED` with Exact ATM Contracts OR `🛑 HOLD 100% CASH OVERNIGHT` |
+
+---
+
+### 6. Deployment Topography
+
+- **Local Machine Daemon:** `http://127.0.0.1:8000` (FastAPI + WebSocket + Desktop Floater HUD)
+- **Cloud Gateway:** `https://finplus-index-breadth.onrender.com` (Render Dockerized Web Service)
+- **GitHub Master Repository:** `https://github.com/Abhilash128912/finplus-index-breadth`
+- **Rate Limit Optimization:** In-memory 30s cross-index quote cache eliminates duplicate API calls between NIFTY 50 and SENSEX 30 constituents.
+
+---
+
+### 7. Strategic Integration: App #2 (750-Stock Intraday Scanner) Synergy
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  APP #1: MACRO & SECTOR REGIME (The "Air Traffic Control")      │
+│  - 2,266 NSE Exchange Gate (Macro Advance/Decline Sentiment)    │
+│  - Nifty 50 & Sensex 30 WABI (Heavyweight Capital Flow)         │
+│  - Verdict: [STRONG UPTREND | CHOPPY | DOWNTREND]               │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │  Master Risk Gate (Permit/Veto)
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  APP #2: 750-STOCK INTRADAY SCANNER (The "Strike Team")         │
+│  - Nifty 500 + Active F&O Equities (~92% of market turnover)    │
+│  - VWAP Breakouts, Volume Surges, Sector Rotation               │
+│  - Only takes trades ALIGNED with App #1's Regime               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### 7.1. Hierarchical Alpha Principles
+1. **The 70% False Breakout Filter:**
+   - Over 70% of intraday individual stock breakouts fail when the broader index is in a distribution or choppy regime.
+   - App #2 queries App #1 (`GET /api/regime`). If the regime is `CHOPPY / DIVERGENT` or `AVOID FRESH BUYS`, App #2 automatically vetoes long breakout signals or throttles position sizes by 50%.
+2. **True Liquid Institutional Breadth Confirmation:**
+   - The 2,266 NSE broad market includes ~1,500 illiquid micro-caps. The 750-stock universe represents the true institutional liquidity pool (>92% of market turnover).
+   - App #2 shares an aggregate telemetry metric (e.g. `% of 750 stocks above intraday VWAP`) back to App #1 as a high-conviction market breadth multiplier.
+3. **Decoupled Architecture (Zero Rate Limits):**
+   - App #1 does NOT scan 750 stocks directly via REST (which would consume 50 batch requests and trigger broker rate limits).
+   - App #2 executes scanning independently and passes a lightweight summary JSON via a local microservice endpoint or shared cache.
+
