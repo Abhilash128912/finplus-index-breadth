@@ -38,7 +38,11 @@ class INDMoneyMarketFeed:
         config_dir: Optional[Path] = None,
     ) -> None:
         self.auth_client = auth_client or INDMoneyAuthClient()
-        self.config_dir = config_dir or Path("D:/AI_APPS/finplus_index_breadth/config")
+        if config_dir:
+            self.config_dir = Path(config_dir)
+        else:
+            # Dynamically locate the config directory relative to repository root
+            self.config_dir = Path(__file__).resolve().parent.parent.parent / "config"
         self.nifty_map = self._load_json(self.config_dir / "nifty50_scrip_map.json")
         self.sensex_map = self._load_json(self.config_dir / "sensex30_scrip_map.json")
 

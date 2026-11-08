@@ -75,7 +75,7 @@ class INDMoneyAuthClient:
         if env_file_path:
             load_dotenv(dotenv_path=env_file_path, override=True)
         else:
-            default_env = Path("D:/AI_APPS/config/.env")
+            default_env = Path(__file__).resolve().parent.parent.parent / "config" / ".env"
             if default_env.exists():
                 load_dotenv(dotenv_path=default_env, override=True)
             else:
@@ -85,7 +85,7 @@ class INDMoneyAuthClient:
         self.totp_secret = totp_secret or os.getenv("INDMONEY_TOTP_SECRET")
         self.mpin = mpin or os.getenv("INDMONEY_MPIN")
         self.access_token = access_token or os.getenv("INDMONEY_ACCESS_TOKEN")
-        self.env_file_path = Path(env_file_path) if env_file_path else Path("D:/AI_APPS/config/.env")
+        self.env_file_path = Path(env_file_path) if env_file_path else Path(__file__).resolve().parent.parent.parent / "config" / ".env"
 
         self._last_token_request_time: float = 0.0
 
