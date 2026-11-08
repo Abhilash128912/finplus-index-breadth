@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime
 import json
 from pathlib import Path
+import time
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -31,6 +32,7 @@ class INDMoneyMarketFeed:
     BASE_URL = "https://api.indstocks.com"
     QUOTES_ENDPOINT = "/market/quotes/full"
     BATCH_CHUNK_SIZE = 15
+    CACHE_TTL_SECONDS = 30.0
 
     def __init__(
         self,
@@ -45,6 +47,8 @@ class INDMoneyMarketFeed:
             self.config_dir = Path(__file__).resolve().parent.parent.parent / "config"
         self.nifty_map = self._load_json(self.config_dir / "nifty50_scrip_map.json")
         self.sensex_map = self._load_json(self.config_dir / "sensex30_scrip_map.json")
+        self._quote_cache: Dict[str, Dict[str, Any]] = {}
+        self._cache_timestamp: float = 0.0
 
     def _load_json(self, path: Path) -> Dict[str, Any]:
         """Safely loads a JSON configuration mapping."""
@@ -55,27 +59,49 @@ class INDMoneyMarketFeed:
             return json.load(f)
 
     def _fetch_quote_chunk(self, scrip_codes: List[str]) -> Dict[str, Any]:
-        """Fetches a single chunk of scrip codes from INDstocks."""
+        """Fetches a single chunk of scrip codes from INDstocks with automatic retry on 429."""
         if not scrip_codes:
             return {}
         headers = self.auth_client.get_auth_headers()
         joined = ",".join(scrip_codes)
         url = f"{self.BASE_URL}{self.QUOTES_ENDPOINT}?scrip-codes={joined}"
-        try:
-            resp = requests.get(url, headers=headers, timeout=8)
-            if resp.status_code == 200:
-                payload = resp.json()
-                return payload.get("data", {})
-            else:
-                logger.warning("Batch quotes chunk returned HTTP %s: %s", resp.status_code, resp.text[:120])
+        
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                resp = requests.get(url, headers=headers, timeout=8)
+                if resp.status_code == 200:
+                    payload = resp.json()
+                    return payload.get("data", {})
+                elif resp.status_code == 429:
+                    if attempt < max_retries:
+                        backoff = 0.6 * (attempt + 1)
+                        logger.warning(
+                            "Batch quotes chunk hit HTTP 429 rate limit. Retrying in %.1fs (attempt %d/%d)...",
+                            backoff,
+                            attempt + 1,
+                            max_retries,
+                        )
+                        time.sleep(backoff)
+                        continue
+                    else:
+                        logger.warning("Batch quotes chunk returned HTTP 429: %s", resp.text[:120])
+                        return {}
+                else:
+                    logger.warning("Batch quotes chunk returned HTTP %s: %s", resp.status_code, resp.text[:120])
+                    return {}
+            except Exception as exc:
+                if attempt < max_retries:
+                    time.sleep(0.5)
+                    continue
+                logger.error("Failed to fetch quote chunk: %s", exc)
                 return {}
-        except Exception as exc:
-            logger.error("Failed to fetch quote chunk: %s", exc)
-            return {}
+        return {}
 
     def fetch_index_quotes(self, index_name: str = "NIFTY") -> List[Dict[str, Any]]:
         """
         Fetches live quotes for all constituents in the specified index ('NIFTY' or 'SENSEX').
+        Reuses cached quotes across indices within CACHE_TTL_SECONDS to avoid rate limits.
         Returns list of constituent dictionaries with live price, day VWAP, and weight.
         """
         target_map = self.nifty_map if index_name.upper() == "NIFTY" else self.sensex_map
@@ -86,16 +112,27 @@ class INDMoneyMarketFeed:
         scrip_to_sym = {v["scrip_code"]: (k, v["weight"]) for k, v in target_map.items()}
         all_scrips = list(scrip_to_sym.keys())
 
-        # Fetch in chunks
-        raw_quotes: Dict[str, Any] = {}
-        for i in range(0, len(all_scrips), self.BATCH_CHUNK_SIZE):
-            chunk = all_scrips[i : i + self.BATCH_CHUNK_SIZE]
-            chunk_data = self._fetch_quote_chunk(chunk)
-            raw_quotes.update(chunk_data)
+        now = time.time()
+        # Invalidate cache if expired
+        if now - self._cache_timestamp > self.CACHE_TTL_SECONDS:
+            self._quote_cache.clear()
+
+        # Determine which scrip codes need to be fetched from network
+        needed_scrips = [scrip for scrip in all_scrips if scrip not in self._quote_cache]
+
+        if needed_scrips:
+            for i in range(0, len(needed_scrips), self.BATCH_CHUNK_SIZE):
+                chunk = needed_scrips[i : i + self.BATCH_CHUNK_SIZE]
+                chunk_data = self._fetch_quote_chunk(chunk)
+                self._quote_cache.update(chunk_data)
+                self._cache_timestamp = time.time()
+                # Polite pacing between chunks to prevent burst rate limiting
+                if i + self.BATCH_CHUNK_SIZE < len(needed_scrips):
+                    time.sleep(0.15)
 
         results: List[Dict[str, Any]] = []
         for scrip_code, (symbol, weight) in scrip_to_sym.items():
-            q = raw_quotes.get(scrip_code, {})
+            q = self._quote_cache.get(scrip_code, {})
             if not q:
                 continue
 
@@ -130,10 +167,11 @@ class INDMoneyMarketFeed:
             })
 
         logger.info(
-            "Fetched %d / %d valid constituent quotes for %s",
+            "Fetched %d / %d valid constituent quotes for %s (Cache: %s)",
             len(results),
             len(target_map),
             index_name,
+            "HIT (0 network calls)" if not needed_scrips else f"FETCHED {len(needed_scrips)} scrips",
         )
         return results
 
