@@ -65,14 +65,20 @@ class NTFYDispatcher:
         message: str,
         priority: int = 3,
         tags: Optional[List[str]] = None,
+        click_url: Optional[str] = None,
+        actions: Optional[str] = None,
     ) -> bool:
-        """Sends push notification to all registered topics."""
+        """Sends push notification to all registered topics with optional click actions."""
         headers = {
             "Title": _safe_header_title(title),
             "Priority": str(priority),
         }
         if tags:
             headers["Tags"] = ",".join(tags)
+        if click_url:
+            headers["Click"] = click_url
+        if actions:
+            headers["Actions"] = actions
 
         any_success = False
         for top in self.topics:
@@ -93,6 +99,67 @@ class NTFYDispatcher:
                 logger.error("Failed to dispatch push to %s: %s", top, exc)
 
         return any_success
+
+    def send_regime_flip_alert(
+        self,
+        prev_label: str,
+        regime_info: Dict[str, Any],
+        breadth_snapshot: Dict[str, Any],
+    ) -> bool:
+        """
+        Dispatches an IMMEDIATE high-priority push alert when the Market Regime transitions.
+        Triggers instantaneously (no 30-min delay) so traders can react to trend shifts immediately.
+        """
+        now_str = datetime.datetime.now(tz=IST).strftime("%H:%M IST")
+        trend = regime_info.get("trend", {})
+        new_label = trend.get("label", "CHOPPY")
+        score_label = trend.get("score_label", "0 / 100")
+
+        eq_dir = regime_info.get("equities_directive", {})
+        opt_dir = regime_info.get("options_directive", {})
+
+        bm_root = breadth_snapshot.get("broad_market", {})
+        bm_data = bm_root.get("broad_market", {})
+        adr = bm_data.get("advance_decline_ratio", 1.0)
+        adv = bm_data.get("advances", 0)
+        dec = bm_data.get("declines", 0)
+
+        vix_info = bm_root.get("vix", {})
+        deriv_info = bm_root.get("derivatives", {})
+        sector_info = bm_root.get("sector_rotation", {})
+        leader = sector_info.get("leader", {})
+
+        title = f"🚨 TREND FLIP [{now_str}] | {new_label}"
+
+        msg_lines = [
+            f"⚡ IMMEDIATE MARKET REGIME TRANSITION",
+            f"• Previous: {prev_label}",
+            f"• New State: {new_label} (CTI: {score_label})",
+            "",
+            f"💼 NEW EQUITIES DIRECTIVE:",
+            f"• {eq_dir.get('action', 'CAUTION')}",
+            "",
+            f"⚡ NEW OPTIONS DIRECTIVE:",
+            f"• {opt_dir.get('action', 'NO TRADE')}",
+            "",
+            f"📊 Key Drivers Behind Shift:",
+            f"• All-NSE ADR: {adr}:1 ({adv} Adv vs {dec} Dec)",
+            f"• India VIX: {vix_info.get('value', 15.5):.2f} ({vix_info.get('change_pct', 0.0):+.1f}%)",
+            f"• Index Options PCR: {deriv_info.get('index_options_pcr', 0.85):.2f}",
+            f"• Sector Leader: {leader.get('name', 'NIFTY')} ({leader.get('change_pct', 0.0):+.2f}%)",
+            "",
+            f"Tap notification to open live FinPlus Cockpit."
+        ]
+
+        tag = "rotating_light" if "DIVERGENT" in new_label or "DOWNTREND" in new_label else "rocket"
+        return self.send_notification(
+            title=title,
+            message="\n".join(msg_lines),
+            priority=5 if "STRONG" in new_label or "DIVERGENT" in new_label else 4,
+            tags=[tag, "bell", "warning"],
+            click_url="https://finplus-index-breadth.onrender.com",
+            actions="view, Open Cockpit, https://finplus-index-breadth.onrender.com",
+        )
 
     def send_periodic_breadth_pulse(self, breadth_snapshot: Dict[str, Any]) -> bool:
         """

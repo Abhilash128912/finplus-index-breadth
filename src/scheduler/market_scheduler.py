@@ -51,6 +51,8 @@ class MarketScheduler:
         self._running = False
         self._last_pulse_slot: Optional[str] = None
         self._last_btst_slot: Optional[str] = None
+        self._last_regime_label: Optional[str] = None
+        self._history_snapshots: List[Dict[str, Any]] = []
         self._listeners: List[Callable[[Dict[str, Any]], None]] = []
 
     def register_listener(self, callback: Callable[[Dict[str, Any]], None]) -> None:
@@ -88,6 +90,43 @@ class MarketScheduler:
                 broad_market=self.latest_broad_market,
             )
 
+            # 5. Compute Intraday Breadth Momentum Velocity (15m/30m delta)
+            now_ts = datetime.datetime.now(tz=IST).timestamp()
+            current_above = float(self.latest_nifty_breadth.get("stocks_above_vwap_pct", 50.0))
+            self._history_snapshots.append({"time": now_ts, "above_pct": current_above})
+            # Keep history within last 45 minutes
+            self._history_snapshots = [s for s in self._history_snapshots if now_ts - s["time"] <= 2700]
+
+            past_samples = [s for s in self._history_snapshots if 600 <= (now_ts - s["time"]) <= 1800]
+            if past_samples:
+                ref_sample = past_samples[0]
+                delta_pct = round(current_above - ref_sample["above_pct"], 1)
+                mins_ago = max(1, int((now_ts - ref_sample["time"]) / 60))
+            else:
+                delta_pct = 0.0
+                mins_ago = 0
+
+            if delta_pct >= 8.0:
+                vel_status = "ACCELERATING"
+                vel_label = f"Accelerating ↗ (+{delta_pct}% in {mins_ago}m)"
+                vel_color = "emerald"
+            elif delta_pct <= -8.0:
+                vel_status = "DETERIORATING"
+                vel_label = f"Deteriorating ↘ ({delta_pct}% in {mins_ago}m)"
+                vel_color = "rose"
+            else:
+                vel_status = "STEADY"
+                vel_label = "Steady → (Consistent Momentum)"
+                vel_color = "slate"
+
+            breadth_velocity = {
+                "status": vel_status,
+                "label": vel_label,
+                "color": vel_color,
+                "delta_pct": delta_pct,
+                "window_minutes": mins_ago,
+            }
+
             snapshot = {
                 "timestamp": datetime.datetime.now(tz=IST).isoformat(),
                 "broad_market": self.latest_broad_market,
@@ -95,6 +134,7 @@ class MarketScheduler:
                 "sensex": self.latest_sensex_breadth,
                 "market_regime": self.latest_regime_result,
                 "btst": self.latest_btst_result,
+                "breadth_velocity": breadth_velocity,
             }
 
             # Broadcast to listeners (WebSocket)
@@ -119,6 +159,23 @@ class MarketScheduler:
             try:
                 # Offload blocking HTTP requests (NSE scrape + INDstocks batch quotes) to worker thread
                 snapshot = await asyncio.to_thread(self.refresh_breadth)
+
+                # 0. Check for Real-time Market Regime Transition (Instant Flip Alert on NTFY)
+                current_label = self.latest_regime_result.get("trend", {}).get("label")
+                if current_label:
+                    if self._last_regime_label is not None and self._last_regime_label != current_label:
+                        logger.info(
+                            "Real-time Regime Transition: %s -> %s. Firing instant NTFY alert!",
+                            self._last_regime_label,
+                            current_label,
+                        )
+                        self.dispatcher.send_regime_flip_alert(
+                            self._last_regime_label,
+                            self.latest_regime_result,
+                            snapshot,
+                        )
+                    self._last_regime_label = current_label
+
                 now = datetime.datetime.now(tz=IST)
                 hour = now.hour
                 minute = now.minute

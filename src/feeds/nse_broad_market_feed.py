@@ -182,6 +182,25 @@ class NSEBroadMarketFeed:
         total_volume = int(eq_turnover.get("volume", 3528797247))
         total_value_cr = round(float(eq_turnover.get("value", 1107796241968.77)) / 1e7, 2)
 
+        # Sectoral Leadership & Rotation
+        tracked_sectors = [
+            "NIFTY BANK", "NIFTY IT", "NIFTY AUTO", 
+            "NIFTY PHARMA", "NIFTY FMCG", "NIFTY METAL", "NIFTY ENERGY"
+        ]
+        sector_items = []
+        for sec_name in tracked_sectors:
+            sec_data = idx_map.get(sec_name, {})
+            if sec_data:
+                sector_items.append({
+                    "name": sec_name.replace("NIFTY ", ""),
+                    "full_name": sec_name,
+                    "last": float(sec_data.get("last", 0.0)),
+                    "change_pct": round(float(sec_data.get("percentChange", 0.0)), 2),
+                })
+        sector_items.sort(key=lambda x: x["change_pct"], reverse=True)
+        top_leader = sector_items[0] if sector_items else {}
+        top_laggard = sector_items[-1] if sector_items else {}
+
         return {
             "timestamp": datetime.datetime.now(tz=IST).isoformat(),
             "market_status": market_state.get("marketStatus", "Closed"),
@@ -189,6 +208,11 @@ class NSEBroadMarketFeed:
             "nifty_spot": float(market_state.get("last", nifty_50.get("last", 25030.35))),
             "nifty_change": float(market_state.get("variation", nifty_50.get("variation", 0.0))),
             "nifty_change_pct": float(market_state.get("percentChange", nifty_50.get("percentChange", 0.0))),
+            "sector_rotation": {
+                "leader": top_leader,
+                "laggard": top_laggard,
+                "sectors": sector_items,
+            },
             "vix": {
                 "value": vix_val,
                 "change": vix_chg,

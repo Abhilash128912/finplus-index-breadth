@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.0] - 2026-11-08 (12:44 IST) - Commit `HEAD`
+### Added
+- **Real-Time Regime Flip Instant NTFY Alerts:** Automated trigger that compares the current regime with the previous regime on every cycle. If the market trend shifts (e.g. from `UPTREND` to `CHOPPY_DIVERGENT`), it instantly fires a Priority 4/5 push alert to `Finplus-Delta` and `Finplus-Breadth` with direct "Open Cockpit" tap action buttons.
+- **Intraday Breadth Momentum Velocity:** Rolling 15m/30m trailing window computing $\Delta\text{Stocks Above VWAP}$. Surfaces `Accelerating ↗`, `Deteriorating ↘`, or `Steady →` as an early warning signal before the index spot chart breaks down.
+- **Sectoral Leadership & Rotation Radar:** Real-time ranking of the top 7 NSE sectoral indices (Bank, IT, Auto, Pharma, FMCG, Metal, Energy) identifying the current market leader and laggard.
+- **Web Dashboard Ribbons:** Added live `Velocity` pill on the Hero trend card and an interactive `Sector Rotation` ribbon displaying live sector percentage changes.
+
+---
+
+## [1.4.0] - 2026-11-08 (12:30 IST) - Commit `8a38031`
+### Added
+- **Institutional Composite Trend Index (CTI):** Replaced brittle single-threshold `if/elif` ladders with a normalized multi-pillar mathematical scoring engine ranging from $-100$ (Extreme Liquidation) to $+100$ (Broad Bull Expansion).
+- **Three-Pillar Balanced Weighting:**
+  - *Pillar 1: Bluechip Benchmark Breadth (Max ±40 pts)*: Integrates Nifty 50 WABI, Sensex 30 WABI cross-index confluence, and Top 5 heavyweights.
+  - *Pillar 2: Broad Market Participation (Max ±35 pts)*: Combines 2,266 All-NSE ADR with Nifty 500 advance/decline volume breadth.
+  - *Pillar 3: Derivatives & Volatility Confluence (Max ±25 pts)*: Integrates Index Options PCR, India VIX intraday momentum ($\Delta\text{VIX}$), and Nifty Futures Basis (Premium/Discount).
+- **Master Divergence Veto Guard:** If Bluechip WABI is positive ($\ge +0.25$) but All-NSE declines dominate the exchange ($\text{ADR} < 0.85$ or Declines $> \text{Advances} + 300$), automatically forces `CHOPPY / DIVERGENT (NARROW BLUECHIP RALLY)` to protect capital against artificial 5-heavyweight manipulation traps.
+- **Live CTI Score Badge:** Displayed directly on the web dashboard hero card (e.g. `CTI SCORE: -6 / 100`).
+
+---
+
 ## [1.3.0] - 2026-11-08 (12:12 IST) - Commit `f5e2c47`
 ### Added
 - **India VIX Volatility Analytics:** Real-time ingestion of India VIX from official NSE exchange feed. Classifies volatility into *Low Volatility (Theta Bleed)* ($<12.0$), *Normal Momentum Sweet Spot* ($12.0-16.5$), *Elevated Volatility* ($16.5-21.0$), and *Event Risk* ($>21.0$).

@@ -86,12 +86,15 @@
     <!-- 1. OVERALL MARKET TREND REGIME -->
     <div id="trend-main-card" class="rounded-2xl p-6 border-2 border-amber-500/50 bg-amber-950/30 relative overflow-hidden shadow-2xl">
       <div class="flex flex-col md:flex-row md:items-center justify-between pb-3 border-b border-white/10 gap-2">
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 flex-wrap">
           <span class="text-xs px-2.5 py-0.5 rounded font-mono font-black uppercase bg-amber-500 text-black">
             OVERALL MARKET TREND REGIME
           </span>
           <span id="trend-score-badge" class="text-xs px-2 py-0.5 rounded font-mono font-black bg-amber-950 border border-amber-500 text-amber-300">
             CTI SCORE: -6 / 100
+          </span>
+          <span id="velocity-badge" class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">
+            Velocity: Steady →
           </span>
           <span class="text-xs text-slate-400 font-mono" id="trend-time">--:-- IST</span>
         </div>
@@ -127,6 +130,12 @@
         <p class="text-xs text-slate-300 mt-1 max-w-5xl leading-relaxed" id="trend-description">
           Nifty 50 was held up by a few heavyweights (46 Adv / 4 Dec), but across the entire NSE exchange, 1,343 stocks declined while only 674 advanced (ADR: 0.50 : 1). The rally lacks broad participation and carries high false-breakout risk.
         </p>
+      </div>
+
+      <!-- Sectoral Leadership Ribbon -->
+      <div class="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-white/5 text-[11px]" id="sector-rotation-strip">
+        <span class="text-slate-400 font-semibold uppercase text-[10px]">Sector Leadership:</span>
+        <span class="text-slate-500 font-mono text-[10px]">Loading sector rotation...</span>
       </div>
     </div>
 
@@ -632,6 +641,35 @@
         pModDown.className = 'p-2.5 rounded-xl border-2 border-rose-500 bg-rose-950/80 text-rose-300 regime-pill-active font-black';
       } else {
         pChoppy.className = 'p-2.5 rounded-xl border-2 border-amber-500 bg-amber-950/80 text-amber-300 regime-pill-active font-black';
+      }
+
+      // Breadth Velocity
+      const vel = data.breadth_velocity || {};
+      const velBadge = document.getElementById('velocity-badge');
+      if (velBadge && vel.label) {
+        velBadge.textContent = `Velocity: ${vel.label}`;
+        velBadge.className = `text-xs px-2 py-0.5 rounded font-mono font-bold border ${
+          vel.color === 'emerald' ? 'bg-emerald-950 border-emerald-500 text-emerald-300' :
+          (vel.color === 'rose' ? 'bg-rose-950 border-rose-500 text-rose-300' : 'bg-slate-800 border-slate-700 text-slate-300')
+        }`;
+      }
+
+      // Sector Rotation Strip
+      const secRot = (data.broad_market && data.broad_market.sector_rotation) ? data.broad_market.sector_rotation : {};
+      const secStrip = document.getElementById('sector-rotation-strip');
+      if (secStrip && secRot.sectors && secRot.sectors.length > 0) {
+        let secHtml = '<span class="text-slate-400 font-semibold uppercase text-[10px] mr-1">Sector Rotation:</span>';
+        secRot.sectors.forEach(s => {
+          const isPos = s.change_pct >= 0;
+          secHtml += `
+            <span class="px-2 py-0.5 rounded font-mono font-bold text-[10px] ${
+              isPos ? 'bg-emerald-950/60 border border-emerald-800/50 text-emerald-300' : 'bg-rose-950/60 border border-rose-800/50 text-rose-300'
+            }">
+              ${s.name} ${isPos ? '+' : ''}${s.change_pct.toFixed(2)}%
+            </span>
+          `;
+        });
+        secStrip.innerHTML = secHtml;
       }
 
       // Equities Directive
