@@ -169,13 +169,31 @@ class MarketRegimeEngine:
         # -------------------------------------------------------------
         # 3. INTRADAY OPTIONS BUYING DIRECTIVE ("Whether I need to Buy Options Today or Not?")
         # -------------------------------------------------------------
+        vix_info = broad_market.get("vix", {}) if broad_market else {}
+        deriv_info = broad_market.get("derivatives", {}) if broad_market else {}
+        vix_val = float(vix_info.get("value") or 15.5)
+        vix_chg_pct = float(vix_info.get("change_pct") or 0.0)
+        pcr_val = float(deriv_info.get("index_options_pcr") or 0.85)
+
+        # Volatility & Derivatives Context Modifiers
+        vol_note = ""
+        if vix_val < 12.0:
+            vol_note += f" ⚠️ Low VIX ({vix_val:.1f}): Sluggish ranges amplify theta decay for option buyers."
+        elif vix_val > 20.0:
+            vol_note += f" ⚡ High VIX ({vix_val:.1f}): Premium inflation and sharp intraday swings. Use wider stops."
+        
+        if pcr_val < 0.80:
+            vol_note += f" 🧱 Call Writing Resistance: Index Options PCR is {pcr_val:.2f} (< 0.85), indicating institutional sellers defending overhead strikes."
+        elif pcr_val >= 1.25:
+            vol_note += f" 🛡️ Put Writing Floor: Index Options PCR is {pcr_val:.2f} (>= 1.25), confirming solid institutional floor on pullbacks."
+
         if trend_code == "STRONG_UPTREND":
             option_action = "CALL BUYING PERMITTED (CE)"
             option_badge = "FAVORABLE FOR OPTION BUYERS"
             option_color = "emerald"
             option_guidance = (
                 "Today is an Option Buyer's Day on the Long side! Directional momentum and volume thrust will outpace theta decay. "
-                "Target ATM or slightly OTM Nifty/Sensex Calls."
+                f"Target ATM or slightly OTM Nifty/Sensex Calls.{vol_note}"
             )
         elif trend_code == "STRONG_DOWNTREND":
             option_action = "PUT BUYING PERMITTED (PE)"
@@ -183,15 +201,15 @@ class MarketRegimeEngine:
             option_color = "rose"
             option_guidance = (
                 "Today is an Option Buyer's Day on the Short side! High downward velocity will rapidly expand Put premiums. "
-                "Target ATM or slightly OTM Puts."
+                f"Target ATM or slightly OTM Puts.{vol_note}"
             )
         elif trend_code in ("UPTREND", "DOWNTREND"):
             option_action = "SELECTIVE OPTION BUYING ONLY (STRICT TRAILING STOPS)"
             option_badge = "MODERATE RISK"
             option_color = "amber"
             option_guidance = (
-                f"Option buying is permissible only with strict discipline. Move stop loss to breakeven quickly. "
-                f"Prefer ATM options only; OTM options risk decay if trend stalls."
+                "Option buying is permissible only with strict discipline. Move stop loss to breakeven quickly. "
+                f"Prefer ATM options only; OTM options risk decay if trend stalls.{vol_note}"
             )
         else:  # CHOPPY / DIVERGENT
             option_action = "DO NOT BUY OPTIONS TODAY (HIGH THETA DECAY / CHOP)"
@@ -199,7 +217,7 @@ class MarketRegimeEngine:
             option_color = "rose"
             option_guidance = (
                 "DO NOT BUY OPTIONS TODAY! The market lacks sustained directional impulse. Buying options today carries an "
-                "85%+ probability of capital erosion via theta decay and false intraday swings. Let option sellers fight—stay in cash."
+                f"85%+ probability of capital erosion via theta decay and false intraday swings. Let option sellers fight—stay in cash.{vol_note}"
             )
 
         # -------------------------------------------------------------

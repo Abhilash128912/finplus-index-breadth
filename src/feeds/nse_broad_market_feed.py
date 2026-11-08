@@ -99,6 +99,41 @@ class NSEBroadMarketFeed:
         except Exception as exc:
             logger.warning("Failed to fetch NSE marketStatus: %s", exc)
 
+        # 5. Fetch Derivatives Snapshot (Index Options PCR & Open Interest)
+        pcr_val = 0.85
+        index_opt_oi = 0
+        stock_opt_oi = 0
+        try:
+            r_deriv = self.session.get(f"{self.BASE_URL}/api/snapshot-derivatives", headers=self.HEADERS, timeout=6)
+            if r_deriv.status_code == 200:
+                stats = r_deriv.json().get("fo", {}).get("onlineTradeStats", [])
+                for st in stats:
+                    if st.get("product") == "OPTIDX":
+                        pcr_val = round(float(st.get("putCallRatio", 0.85)), 2)
+                        index_opt_oi = int(st.get("oivalue", 0))
+                    elif st.get("product") == "OPTSTK":
+                        stock_opt_oi = int(st.get("oivalue", 0))
+        except Exception as exc:
+            logger.warning("Failed to fetch NSE snapshot-derivatives: %s", exc)
+
+        # 6. Fetch Nifty Near-Month Futures (Basis & Discount/Premium)
+        fut_basis = 0.0
+        fut_oi = 0
+        fut_price = 0.0
+        try:
+            r_fut = self.session.get(f"{self.BASE_URL}/api/liveEquity-derivatives?index=nse50_fut", headers=self.HEADERS, timeout=6)
+            if r_fut.status_code == 200:
+                fut_list = r_fut.json().get("data", [])
+                if fut_list:
+                    primary_fut = fut_list[0]
+                    fut_price = float(primary_fut.get("lastPrice", 0.0))
+                    spot_val = float(primary_fut.get("underlyingValue", 0.0))
+                    fut_oi = int(primary_fut.get("openInterest", 0))
+                    if fut_price > 0 and spot_val > 0:
+                        fut_basis = round(fut_price - spot_val, 2)
+        except Exception as exc:
+            logger.warning("Failed to fetch NSE Nifty futures: %s", exc)
+
         # Extract full exchange metrics
         full_adv = int(raw_all_stocks.get("advances", 674))
         full_dec = int(raw_all_stocks.get("declines", 1343))
@@ -112,6 +147,35 @@ class NSEBroadMarketFeed:
         nifty_50 = idx_map.get("NIFTY 50", {})
         nifty_mid = idx_map.get("NIFTY MIDCAP 150", {})
         nifty_small = idx_map.get("NIFTY SMALLCAP 250", {})
+        india_vix_entry = idx_map.get("INDIA VIX", {})
+
+        # Parse India VIX
+        vix_val = float(india_vix_entry.get("last") or 15.50)
+        vix_chg = float(india_vix_entry.get("variation") or 0.0)
+        vix_chg_pct = float(india_vix_entry.get("percentChange") or 0.0)
+        if vix_val < 12.0:
+            vix_regime = "LOW_VOLATILITY_THETA_DECAY"
+            vix_label = "Low Volatility (High Theta Bleed)"
+        elif vix_val <= 16.5:
+            vix_regime = "NORMAL_MOMENTUM_SWEET_SPOT"
+            vix_label = "Optimal Momentum (Sweet Spot)"
+        elif vix_val <= 21.0:
+            vix_regime = "ELEVATED_VOLATILITY"
+            vix_label = "Elevated Volatility (Wide Swings)"
+        else:
+            vix_regime = "HIGH_PANIC_EVENT"
+            vix_label = "High Volatility (Event Risk / IV Crush)"
+
+        # Parse PCR Regime
+        if pcr_val >= 1.25:
+            pcr_regime = "BULLISH_PUT_WRITING_SUPPORT"
+            pcr_label = "Bullish Floor (Put Writing Dominates)"
+        elif pcr_val >= 0.85:
+            pcr_regime = "NEUTRAL_EQUILIBRIUM"
+            pcr_label = "Equilibrium (Balanced OI)"
+        else:
+            pcr_regime = "CALL_WRITING_RESISTANCE"
+            pcr_label = "Overhead Resistance (Call Writing Dominates)"
 
         # Total Exchange Turnover
         eq_turnover = turnover_data.get("yesterday", {}) or turnover_data.get("today", {})
@@ -125,6 +189,24 @@ class NSEBroadMarketFeed:
             "nifty_spot": float(market_state.get("last", nifty_50.get("last", 25030.35))),
             "nifty_change": float(market_state.get("variation", nifty_50.get("variation", 0.0))),
             "nifty_change_pct": float(market_state.get("percentChange", nifty_50.get("percentChange", 0.0))),
+            "vix": {
+                "value": vix_val,
+                "change": vix_chg,
+                "change_pct": vix_chg_pct,
+                "regime": vix_regime,
+                "label": vix_label,
+            },
+            "derivatives": {
+                "index_options_pcr": pcr_val,
+                "pcr_regime": pcr_regime,
+                "pcr_label": pcr_label,
+                "index_options_oi": index_opt_oi,
+                "stock_options_oi": stock_opt_oi,
+                "nifty_futures_price": fut_price,
+                "nifty_futures_basis": fut_basis,
+                "futures_basis_type": "PREMIUM" if fut_basis >= 0 else "DISCOUNT",
+                "nifty_futures_oi": fut_oi,
+            },
             "broad_market": {
                 "universe_name": "Full NSE Exchange (All Active Listed Equities)",
                 "total_stocks_evaluated": full_total,

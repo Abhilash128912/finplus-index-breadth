@@ -126,6 +126,16 @@ class NTFYDispatcher:
         adr = broad.get("advance_decline_ratio", nifty.get("advance_decline_ratio", 1.0))
         turnover_cr = broad.get("total_market_turnover_crores", 0)
 
+        # Derivatives & Volatility
+        bm_root = breadth_snapshot.get("broad_market", {})
+        vix_info = bm_root.get("vix", {})
+        deriv_info = bm_root.get("derivatives", {})
+        vix_val = vix_info.get("value", 15.5)
+        vix_chg = vix_info.get("change_pct", 0.0)
+        pcr_val = deriv_info.get("index_options_pcr", 0.85)
+        fut_basis = deriv_info.get("nifty_futures_basis", 0.0)
+        basis_type = deriv_info.get("futures_basis_type", "DISCOUNT")
+
         title = f"FinPlus+ Trend [{now_str}] | {trend_label}"
 
         msg_lines = [
@@ -138,6 +148,11 @@ class NTFYDispatcher:
             f"⚡ OPTIONS DIRECTIVE:",
             f"• {option_action}",
             f"• {opt_dir.get('guidance', '')}",
+            "",
+            f"📈 DERIVATIVES & VOLATILITY PILLARS:",
+            f"• India VIX: {vix_val:.2f} ({vix_chg:+.1f}%) | {vix_info.get('label', 'Normal')}",
+            f"• Index Options PCR: {pcr_val:.2f} | {deriv_info.get('pcr_label', 'Equilibrium')}",
+            f"• Nifty Futures Basis: {fut_basis:+.1f} pts ({basis_type})",
             "",
             f"📊 ALL NSE STOCKS BREADTH (2,266 Equities):",
             f"• Advances: {total_adv} | Declines: {total_dec} (ADR: {adr}:1)",

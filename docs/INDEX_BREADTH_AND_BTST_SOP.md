@@ -128,3 +128,33 @@ flowchart TD
    - App #1 does NOT scan 750 stocks directly via REST (which would consume 50 batch requests and trigger broker rate limits).
    - App #2 executes scanning independently and passes a lightweight summary JSON via a local microservice endpoint or shared cache.
 
+---
+
+### 8. Derivatives & Volatility Analytics (Pillars 2 & 3)
+
+The engine incorporates direct exchange feeds for **India VIX**, **Index Options Put-Call Ratio (PCR)**, and **Nifty Futures Basis**:
+
+#### 8.1. India VIX Volatility Matrix
+$$\text{VIX} = \text{Annualized 30-day Expected Volatility derived from Nifty Option Prices}$$
+
+| VIX Range | Market Regime | Option Buying Impact | Engine Directive Modifier |
+| :--- | :--- | :--- | :--- |
+| **$< 12.0$** | Low Volatility / Sluggish Range | **High Theta Bleed Risk** | Downgrades aggressive option buying; warns of rapid theta decay |
+| **$12.0 - 16.5$** | Normal Momentum (Sweet Spot) | **Optimal Premium Expansion** | Ideal environment for intraday Calls/Puts and BTST continuation |
+| **$16.5 - 21.0$** | Elevated Volatility | **Wide Intraday Swings** | Higher stop-loss discipline; tight trailing stops enforced |
+| **$> 21.0$** | High Volatility / Event Risk | **Extreme IV Crush Risk** | Prohibits holding options overnight through major events |
+
+#### 8.2. Index Options Put-Call Ratio (PCR)
+$$\text{PCR}_{\text{OI}} = \frac{\sum \text{Open Interest of all Index Put Options}}{\sum \text{Open Interest of all Index Call Options}}$$
+
+* **$\text{PCR} \ge 1.25$ (Bullish Floor):** Institutional Put writers dominate, providing strong dip support.
+* **$0.85 \le \text{PCR} < 1.25$ (Equilibrium):** Call and Put writers are evenly matched.
+* **$\text{PCR} < 0.85$ (Overhead Resistance):** Aggressive Call writing overhead creates a ceiling on rallies.
+
+#### 8.3. Nifty Futures Basis (Price vs Spot)
+$$\text{Basis} = \text{Nifty Near-Month Futures LTP} - \text{Nifty Spot LTP}$$
+
+* **Positive Basis (Premium):** Institutional market makers are willing to pay a premium to carry long risk.
+* **Negative Basis (Discount):** Indicates cautious hedging or institutional selling pressure.
+
+

@@ -270,6 +270,85 @@
   </section>
 
   <!-- ========================================================================= -->
+  <!-- SECTION 2B: DERIVATIVES & VOLATILITY RADAR (INDIA VIX • OPTIONS PCR • FUTURES BASIS) -->
+  <!-- ========================================================================= -->
+  <section class="my-4">
+    <div class="glass-card rounded-2xl p-6 border-slate-800 relative overflow-hidden">
+      <div class="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-slate-800/80 gap-2">
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 class="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+              <span>⚡ DERIVATIVES & VOLATILITY RADAR</span>
+            </h2>
+            <span id="vix-badge" class="text-xs px-2.5 py-0.5 rounded font-mono font-bold bg-amber-950 border border-amber-600/40 text-amber-300">
+              ELEVATED VOLATILITY
+            </span>
+          </div>
+          <p class="text-xs text-slate-400 mt-0.5">Real-time India VIX, Index Options Put-Call Ratio (PCR), and Nifty Futures Basis</p>
+        </div>
+        <div class="text-left md:text-right mono text-xs">
+          <div class="text-slate-400">Index Options OI: <b id="index-opt-oi" class="text-white">1.20 Cr Contracts</b></div>
+          <div class="text-slate-500">Nifty Fut OI: <span id="nifty-fut-oi">1.86 Lakh Contracts</span></div>
+        </div>
+      </div>
+
+      <!-- Derivatives Stats Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+        <!-- India VIX Card -->
+        <div class="bg-slate-900/80 p-4 rounded-xl border border-slate-800/80">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-slate-400 font-semibold uppercase">India VIX (Implied Volatility)</span>
+            <span id="vix-change" class="text-xs mono font-bold text-rose-400">+13.35%</span>
+          </div>
+          <div class="flex items-baseline gap-3 mt-2">
+            <div id="vix-value" class="text-3xl font-black mono text-white">17.66</div>
+            <span id="vix-pill" class="text-[11px] px-2 py-0.5 rounded bg-amber-950/80 border border-amber-600/40 text-amber-300 font-mono font-bold">
+              Elevated
+            </span>
+          </div>
+          <div class="text-[11px] text-slate-400 mt-2" id="vix-interpretation">
+            Wide price swings. Fast intraday moves, higher stop-loss discipline needed.
+          </div>
+        </div>
+
+        <!-- Index Options PCR Card -->
+        <div class="bg-slate-900/80 p-4 rounded-xl border border-slate-800/80">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-slate-400 font-semibold uppercase">Index Options PCR (Put-Call Ratio)</span>
+            <span id="pcr-regime-pill" class="text-[10px] px-2 py-0.5 rounded bg-rose-950/80 border border-rose-600/40 text-rose-300 font-mono font-bold">
+              Call Writing Dominates
+            </span>
+          </div>
+          <div class="flex items-baseline gap-3 mt-2">
+            <div id="pcr-value" class="text-3xl font-black mono text-rose-400">0.85</div>
+            <span class="text-xs text-slate-400 mono">Exchange Ratio</span>
+          </div>
+          <div class="text-[11px] text-slate-400 mt-2" id="pcr-interpretation">
+            PCR &lt; 0.85 signals institutional Call writing overhead. Ceiling resistance on rallies.
+          </div>
+        </div>
+
+        <!-- Nifty Futures Basis Card -->
+        <div class="bg-slate-900/80 p-4 rounded-xl border border-slate-800/80">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-slate-400 font-semibold uppercase">Nifty Futures Basis (Price vs Spot)</span>
+            <span id="futures-basis-pill" class="text-[10px] px-2 py-0.5 rounded bg-amber-950/80 border border-amber-600/40 text-amber-300 font-mono font-bold">
+              DISCOUNT
+            </span>
+          </div>
+          <div class="flex items-baseline gap-3 mt-2">
+            <div id="futures-basis-value" class="text-3xl font-black mono text-amber-400">-22.35</div>
+            <span class="text-xs text-slate-400 mono">points spread</span>
+          </div>
+          <div class="text-[11px] text-slate-400 mt-2" id="futures-basis-desc">
+            Futures: <b class="text-white mono" id="fut-price-ref">25,008</b> vs Spot: <b class="text-white mono" id="fut-spot-ref">25,030.35</b>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================================= -->
   <!-- SECTION 3: BENCHMARK INDICES BREADTH (NIFTY 50 & SENSEX 30) -->
   <!-- ========================================================================= -->
   <section class="grid grid-cols-1 lg:grid-cols-12 gap-6 my-2">
@@ -626,6 +705,101 @@
       if (segs.nifty_smallcap) {
         document.getElementById('seg-small-adv').textContent = `${segs.nifty_smallcap.advances} Adv`;
         document.getElementById('seg-small-dec').textContent = `${segs.nifty_smallcap.declines} Dec`;
+      }
+
+      // -----------------------------------------------------------------
+      // 2B. DERIVATIVES & VOLATILITY RADAR (INDIA VIX • OPTIONS PCR • FUTURES)
+      // -----------------------------------------------------------------
+      const vixInfo = (data.broad_market && data.broad_market.vix) ? data.broad_market.vix : {};
+      const derivInfo = (data.broad_market && data.broad_market.derivatives) ? data.broad_market.derivatives : {};
+
+      if (vixInfo.value !== undefined) {
+        document.getElementById('vix-value').textContent = Number(vixInfo.value).toFixed(2);
+        const vixChg = Number(vixInfo.change_pct || 0);
+        const vixChgElem = document.getElementById('vix-change');
+        if (vixChgElem) {
+          vixChgElem.textContent = `${vixChg >= 0 ? '+' : ''}${vixChg.toFixed(2)}%`;
+          vixChgElem.className = `text-xs mono font-bold ${vixChg > 0 ? 'text-rose-400' : 'text-emerald-400'}`;
+        }
+
+        const vixPill = document.getElementById('vix-pill');
+        const vixBadge = document.getElementById('vix-badge');
+        if (vixBadge) vixBadge.textContent = vixInfo.label || 'Optimal Momentum';
+        if (vixPill) {
+          vixPill.textContent = vixInfo.value < 12.0 ? 'Low Vol' : (vixInfo.value <= 16.5 ? 'Sweet Spot' : (vixInfo.value <= 21.0 ? 'Elevated' : 'High Panic'));
+        }
+
+        const vixInterp = document.getElementById('vix-interpretation');
+        if (vixInterp) {
+          if (vixInfo.value < 12.0) {
+            vixInterp.textContent = 'Low volatility: Slow price action. Extreme theta decay risk for option buyers.';
+          } else if (vixInfo.value <= 16.5) {
+            vixInterp.textContent = 'Normal volatility: Optimal momentum and premium expansion for directional option trades.';
+          } else {
+            vixInterp.textContent = 'Elevated volatility: Wide price swings. Fast intraday moves, higher stop-loss discipline needed.';
+          }
+        }
+      }
+
+      if (derivInfo.index_options_pcr !== undefined) {
+        const pcr = Number(derivInfo.index_options_pcr);
+        const pcrValElem = document.getElementById('pcr-value');
+        if (pcrValElem) pcrValElem.textContent = pcr.toFixed(2);
+
+        const pcrPill = document.getElementById('pcr-regime-pill');
+        const pcrInterp = document.getElementById('pcr-interpretation');
+
+        if (pcr >= 1.25) {
+          if (pcrValElem) pcrValElem.className = 'text-3xl font-black mono text-emerald-400';
+          if (pcrPill) {
+            pcrPill.textContent = 'Put Writing Floor';
+            pcrPill.className = 'text-[10px] px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-600/40 text-emerald-300 font-mono font-bold';
+          }
+          if (pcrInterp) pcrInterp.textContent = 'PCR >= 1.25 signals strong institutional Put writing support below the market on dips.';
+        } else if (pcr >= 0.85) {
+          if (pcrValElem) pcrValElem.className = 'text-3xl font-black mono text-slate-200';
+          if (pcrPill) {
+            pcrPill.textContent = 'Equilibrium';
+            pcrPill.className = 'text-[10px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-mono font-bold';
+          }
+          if (pcrInterp) pcrInterp.textContent = 'PCR balanced between 0.85 and 1.25. Call and Put writers are evenly matched.';
+        } else {
+          if (pcrValElem) pcrValElem.className = 'text-3xl font-black mono text-rose-400';
+          if (pcrPill) {
+            pcrPill.textContent = 'Call Writing Resistance';
+            pcrPill.className = 'text-[10px] px-2 py-0.5 rounded bg-rose-950/80 border border-rose-600/40 text-rose-300 font-mono font-bold';
+          }
+          if (pcrInterp) pcrInterp.textContent = 'PCR < 0.85 signals aggressive Call writing overhead. Heavy resistance on rallies.';
+        }
+
+        if (derivInfo.index_options_oi && document.getElementById('index-opt-oi')) {
+          document.getElementById('index-opt-oi').textContent = `${(derivInfo.index_options_oi / 1e7).toFixed(2)} Cr Contracts`;
+        }
+        if (derivInfo.nifty_futures_oi && document.getElementById('nifty-fut-oi')) {
+          document.getElementById('nifty-fut-oi').textContent = `${(derivInfo.nifty_futures_oi / 1e5).toFixed(2)} Lakh Contracts`;
+        }
+      }
+
+      if (derivInfo.nifty_futures_basis !== undefined) {
+        const basis = Number(derivInfo.nifty_futures_basis);
+        const basisValElem = document.getElementById('futures-basis-value');
+        if (basisValElem) {
+          basisValElem.textContent = `${basis >= 0 ? '+' : ''}${basis.toFixed(2)}`;
+          basisValElem.className = `text-3xl font-black mono ${basis >= 0 ? 'text-emerald-400' : 'text-amber-400'}`;
+        }
+
+        const basisPill = document.getElementById('futures-basis-pill');
+        if (basisPill) {
+          basisPill.textContent = derivInfo.futures_basis_type || (basis >= 0 ? 'PREMIUM' : 'DISCOUNT');
+          basisPill.className = `text-[10px] px-2 py-0.5 rounded font-mono font-bold ${basis >= 0 ? 'bg-emerald-950/80 border border-emerald-600/40 text-emerald-300' : 'bg-amber-950/80 border border-amber-600/40 text-amber-300'}`;
+        }
+
+        if (derivInfo.nifty_futures_price && document.getElementById('fut-price-ref')) {
+          document.getElementById('fut-price-ref').textContent = Number(derivInfo.nifty_futures_price).toLocaleString('en-IN');
+        }
+        if (data.broad_market && data.broad_market.nifty_spot && document.getElementById('fut-spot-ref')) {
+          document.getElementById('fut-spot-ref').textContent = Number(data.broad_market.nifty_spot).toLocaleString('en-IN');
+        }
       }
 
       // -----------------------------------------------------------------
