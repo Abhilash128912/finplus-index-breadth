@@ -73,6 +73,28 @@ class INDMoneyMarketFeed:
                 if resp.status_code == 200:
                     payload = resp.json()
                     return payload.get("data", {})
+                elif resp.status_code in (401, 403):
+                    logger.warning(
+                        "INDstocks token rejected (HTTP %s): %s. Triggering automatic headless TOTP authentication...",
+                        resp.status_code,
+                        resp.text[:120],
+                    )
+                    # Broker invalidated or revoked session: generate brand new token via TOTP
+                    try:
+                        self.auth_client.access_token = None
+                        new_token = self.auth_client.generate_fresh_token(persist_to_env=True)
+                        headers = {"x-api-key": self.auth_client.client_id, "access-token": new_token}
+                        # Immediate retry with fresh token
+                        retry_resp = requests.get(url, headers=headers, timeout=8)
+                        if retry_resp.status_code == 200:
+                            logger.info("Successfully authenticated via TOTP and fetched quotes!")
+                            return retry_resp.json().get("data", {})
+                        else:
+                            logger.error("TOTP retry quote fetch returned HTTP %s: %s", retry_resp.status_code, retry_resp.text[:120])
+                            return {}
+                    except Exception as e:
+                        logger.error("Automated TOTP re-authentication failed: %s", e)
+                        return {}
                 elif resp.status_code == 429:
                     if attempt < max_retries:
                         backoff = 0.6 * (attempt + 1)
@@ -173,83 +195,5 @@ class INDMoneyMarketFeed:
             index_name,
             "HIT (0 network calls)" if not needed_scrips else f"FETCHED {len(needed_scrips)} scrips",
         )
-        
-        # Resilient fallback: If INDstocks token is expired (HTTP 401/403) or offline, fetch via Yahoo Finance
-        if len(results) < 5:
-            logger.warning(
-                "INDstocks feed returned %d quotes for %s. Engaging automatic live fallback...",
-                len(results),
-                index_name,
-            )
-            fallback_res = self._fetch_fallback_quotes(target_map, index_name)
-            if fallback_res:
-                return fallback_res
-
-        return results
-
-    def _fetch_fallback_quotes(self, target_map: Dict[str, Any], index_name: str) -> List[Dict[str, Any]]:
-        """
-        Resilient automated fallback to Yahoo Finance when INDstocks API token expires or fails.
-        Guarantees accurate heavyweight monitoring and breadth calculation with zero downtime.
-        """
-        import yfinance as yf
-        sym_to_ticker = {}
-        for sym in target_map.keys():
-            t = "TMPV.NS" if sym == "TATAMOTORS" else f"{sym}.NS"
-            sym_to_ticker[sym] = t
-
-        tickers = list(sym_to_ticker.values())
-        results: List[Dict[str, Any]] = []
-        try:
-            df = yf.download(tickers, period="2d", interval="15m", progress=False)
-            if df.empty:
-                return []
-
-            for sym, meta in target_map.items():
-                ticker = sym_to_ticker[sym]
-                try:
-                    if ("Close", ticker) not in df.columns and ticker not in df["Close"]:
-                        continue
-                    close_s = df["Close"][ticker].dropna()
-                    if close_s.empty:
-                        continue
-                    live_price = float(close_s.iloc[-1])
-                    high_s = df["High"][ticker].dropna()
-                    low_s = df["Low"][ticker].dropna()
-                    open_s = df["Open"][ticker].dropna()
-                    vol_s = df["Volume"][ticker].dropna()
-
-                    day_high = float(high_s.iloc[-1]) if not high_s.empty else live_price
-                    day_low = float(low_s.iloc[-1]) if not low_s.empty else live_price
-                    day_open = float(open_s.iloc[0]) if not open_s.empty else live_price
-                    prev_close = float(close_s.iloc[0]) if len(close_s) > 1 else live_price
-                    volume = int(vol_s.iloc[-1]) if not vol_s.empty else 0
-                    change_pct = round(((live_price - prev_close) / prev_close) * 100, 2) if prev_close > 0 else 0.0
-
-                    day_vwap = round((day_high + day_low + live_price) / 3.0, 2)
-                    is_above_vwap = live_price >= day_vwap
-
-                    results.append({
-                        "symbol": sym,
-                        "scrip_code": meta.get("scrip_code", sym),
-                        "weight": meta.get("weight", 1.0),
-                        "live_price": live_price,
-                        "day_vwap": day_vwap,
-                        "day_high": day_high,
-                        "day_low": day_low,
-                        "day_open": day_open,
-                        "prev_close": prev_close,
-                        "volume": volume,
-                        "change_pct": change_pct,
-                        "is_above_vwap": is_above_vwap,
-                        "spread_from_vwap_pct": round(((live_price - day_vwap) / day_vwap) * 100, 2) if day_vwap > 0 else 0.0,
-                    })
-                except Exception:
-                    continue
-
-            logger.info("Successfully fetched %d / %d constituent quotes via live fallback for %s", len(results), len(target_map), index_name)
-        except Exception as e:
-            logger.error("Live fallback failed for %s: %s", index_name, e)
-
         return results
 
