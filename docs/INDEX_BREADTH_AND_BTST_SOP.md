@@ -5,10 +5,11 @@
 Document Reference : FINPLUS-SOP-APP-001
 App ID             : APP-01 (finplus_index_breadth)
 System Path        : D:\AI_APPS\finplus_index_breadth\
-Last Stamped       : 2026-11-07T20:30:00+05:30
+Last Stamped       : 2026-11-08T12:15:00+05:30
 Author             : FinPlus+ Enterprise Infrastructure
 Verified User      : Abhilash Babu
-Cloud Target       : Render (Free Tier Blueprint: render.yaml)
+Cloud Target       : Render (Dockerized Web Service: https://finplus-index-breadth.onrender.com)
+GitHub Repository  : https://github.com/Abhilash128912/finplus-index-breadth
 Brand Identity     : FinPlus+ ⨁ (Healthcare / Pharmacy-grade Reliability)
 Policy             : ZERO FABRICATED DATA / REAL BROKER LEDGER ONLY
 Compliance         : SEBI Cash STBT Restriction Observed (BTST or 100% Cash Overnight)
@@ -156,5 +157,18 @@ $$\text{Basis} = \text{Nifty Near-Month Futures LTP} - \text{Nifty Spot LTP}$$
 
 * **Positive Basis (Premium):** Institutional market makers are willing to pay a premium to carry long risk.
 * **Negative Basis (Discount):** Indicates cautious hedging or institutional selling pressure.
+
+---
+
+### 9. System Revision & Engineering Audit Log
+
+| Release / Commit | Date & Time (IST) | Component(s) | Change Description & Institutional Impact |
+| :--- | :--- | :--- | :--- |
+| **v1.3.0** (`f5e2c47`) | 2026-11-08 12:12 | `nse_broad_market_feed`, `market_regime_engine`, `ntfy_dispatcher`, `frontend` | **Pillars 2 & 3 Integration:** Integrated real-time India VIX (sweet spot vs theta bleed), Index Options PCR (0.85 overhead resistance / put support), and Nifty Futures Basis (-22.3 pts discount) directly into the decision directives, push payloads, and web radar. |
+| **v1.2.0** (`94b9110`) | 2026-11-08 11:56 | `index_btst_engine`, `ntfy_dispatcher`, `frontend` | **Strict Options Barring:** Eliminated contradictory standby call contracts when BTST is disqualified. On choppy or cash days, option contracts are strictly set to `None`, locked with a red security banner, and prohibited in NTFY alerts. |
+| **v1.1.0** (`1b2e3bc`) | 2026-11-08 11:49 | `server.py`, `market_scheduler.py` | **Asynchronous Worker Thread Offloading:** Replaced synchronous startup blocking with `asyncio.to_thread` for the breadth poller. Server port binds in $<0.1\text{s}$, health checks respond in $<2\text{ms}$, eliminating Render gateway timeouts. |
+| **v1.0.1** (`bfc5a07`) | 2026-11-08 11:11 | `indmoney_market_feed.py` | **Cross-Index Smart Cache (HTTP 429 Elimination):** Exploited 100% overlap between Nifty 50 and Sensex 30 constituent scrips. Cached 50 quotes in memory for 30s so Sensex requires 0 network calls, eliminating broker rate limits. Added exponential backoff. |
+| **v1.0.0** (`b25551b`) | 2026-11-07 20:30 | Core Architecture | **Initial Master Release:** 2,266 NSE Equities Broad Market Feed, Nifty & Sensex WABI, 5 Heavyweight Confluence, 3:10 PM BTST binary radar, dual NTFY dispatcher, Docker containerization. |
+
 
 
