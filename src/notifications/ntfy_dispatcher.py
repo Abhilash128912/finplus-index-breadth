@@ -193,25 +193,25 @@ class NTFYDispatcher:
                 tags=["zap", "rocket", "moneybag"],
             )
         else:
-            title = f"FinPlus+ BTST [{now_str}] | HOLD 100% CASH OVERNIGHT"
+            title = f"FinPlus+ BTST [{now_str}] | 🛑 100% CASH (NO TRADE)"
             reasons = btst_data.get("reasons", ["Market breadth neutral or choppy"])
             reasons_str = "\n".join([f"• {r}" for r in reasons])
 
             msg_lines = [
-                f"🛑 RECOMMENDATION: HOLD 100% CASH OVERNIGHT",
+                f"🛑 BTST DIRECTIVE: HOLD 100% CASH OVERNIGHT",
+                f"🚫 OVERNIGHT OPTIONS: STRICTLY BARRED (DO NOT BUY CALLS/PUTS)",
                 f"",
-                f"Reasons for Invalidation:",
+                f"📋 Why Overnight Trade Is Disqualified:",
                 f"{reasons_str}",
                 f"",
-                f"🎯 ATM Contracts on Standby:",
-                f"• Nifty ATM: {nifty_opt.get('contract_symbol', 'NIFTY ATM CE')}",
-                f"• Sensex ATM: {sensex_opt.get('contract_symbol', 'SENSEX ATM CE')}",
+                f"💡 Capital Protection Rule:",
+                f"Carrying overnight calls in a choppy/divergent market has a >68% probability of severe gap-down reversal and overnight theta erosion. Zero overnight risk is taken.",
                 f"",
-                f"💡 Capital Preservation: Avoid overnight gap-down & theta decay risk when breadth is choppy."
+                f"🔒 Action: Do NOT place any orders. Maintain 100% Cash balance overnight."
             ]
             return self.send_notification(
                 title=title,
                 message="\n".join(msg_lines),
                 priority=4,
-                tags=["shield", "warning"],
+                tags=["octagonal_sign", "shield", "no_entry"],
             )

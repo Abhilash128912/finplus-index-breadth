@@ -195,12 +195,12 @@ class IndexBTSTEngine:
             synthesis_directive = "🛑 HOLD 100% CASH OVERNIGHT"
             synthesis_desc = "Market breadth lacks institutional momentum. Hold cash to avoid overnight theta decay."
 
-        # Compute contracts (for reference or execution)
-        nifty_contract = compute_atm_option(nifty_spot, "NIFTY")
-        sensex_contract = compute_atm_option(sensex_spot, "SENSEX")
+        # Compute contracts: only active if BTST is strictly qualified
+        nifty_contract = compute_atm_option(nifty_spot, "NIFTY") if is_qualified else None
+        sensex_contract = compute_atm_option(sensex_spot, "SENSEX") if is_qualified else None
 
-        preferred_index = "NIFTY 50" if nifty_wabi >= sensex_wabi else "SENSEX 30"
-        primary_contract = nifty_contract if preferred_index == "NIFTY 50" else sensex_contract
+        preferred_index = ("NIFTY 50" if nifty_wabi >= sensex_wabi else "SENSEX 30") if is_qualified else "NONE (HOLD 100% CASH)"
+        primary_contract = (nifty_contract if preferred_index == "NIFTY 50" else sensex_contract) if is_qualified else None
 
         return {
             "status": "BTST_QUALIFIED" if is_qualified else "NO_TRADE",
@@ -216,7 +216,8 @@ class IndexBTSTEngine:
             },
             "instrument": preferred_index,
             "action": "BUY_CALL_OPTION_OR_FUTURES_LONG" if is_qualified else "HOLD_100_PERCENT_CASH",
-            "execution_window": "3:20 PM - 3:28 PM IST",
+            "option_trade_status": "QUALIFIED_CALL_BUYING" if is_qualified else "STRICTLY_BARRED",
+            "execution_window": "3:20 PM - 3:28 PM IST" if is_qualified else "N/A (NO EXECUTION)",
             "primary_option_contract": primary_contract,
             "nifty_atm_contract": nifty_contract,
             "sensex_atm_contract": sensex_contract,

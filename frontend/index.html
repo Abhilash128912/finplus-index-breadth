@@ -401,33 +401,14 @@
         </div>
       </div>
 
-      <!-- EXACT ATM OPTION CONTRACTS (STANDBY REFERENCE ONLY) -->
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-        <!-- NIFTY ATM OPTION CARD -->
-        <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 relative opacity-80">
-          <div class="flex items-center justify-between pb-2 border-b border-slate-800">
-            <span class="text-xs font-bold text-white mono" id="nifty-contract-title">NIFTY 12-NOV-2026 25050 CE</span>
-            <span class="text-[10px] px-2 py-0.5 rounded bg-rose-950 text-rose-400 font-mono font-bold border border-rose-800/40">
-              STANDBY (VETOED)
-            </span>
+      <!-- EXACT ATM OPTION CONTRACTS (ACTIVE ONLY UPON HIGH CONVICTION QUALIFICATION) -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4" id="btst-contracts-grid">
+        <div class="col-span-full p-4 rounded-xl bg-rose-950/30 border border-rose-900/50 text-center">
+          <div class="text-rose-400 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5">
+            <span>🚫</span> <span>OVERNIGHT OPTIONS STRICTLY BARRED (NO CONTRACTS TO CARRY)</span>
           </div>
-          <div class="text-xs text-slate-400 mt-2 space-y-1">
-            <div>Spot Price: <b class="text-white mono" id="nifty-spot-ref">25,030.35</b> • ATM Strike: <b id="nifty-atm-strike-ref" class="text-slate-300 mono">25050 CE</b> (Step 50)</div>
-            <div>Target: <span class="text-emerald-400 mono">+80 to +140 pts</span> • Stop-Loss: <span class="text-rose-400 mono">Close below Day VWAP</span></div>
-          </div>
-        </div>
-
-        <!-- SENSEX ATM OPTION CARD -->
-        <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 relative opacity-80">
-          <div class="flex items-center justify-between pb-2 border-b border-slate-800">
-            <span class="text-xs font-bold text-white mono" id="sensex-contract-title">SENSEX 13-NOV-2026 79400 CE</span>
-            <span class="text-[10px] px-2 py-0.5 rounded bg-rose-950 text-rose-400 font-mono font-bold border border-rose-800/40">
-              STANDBY (VETOED)
-            </span>
-          </div>
-          <div class="text-xs text-slate-400 mt-2 space-y-1">
-            <div>Spot Price: <b class="text-white mono" id="sensex-spot-ref">79,450.00</b> • ATM Strike: <b id="sensex-atm-strike-ref" class="text-slate-300 mono">79400 CE</b> (Step 100)</div>
-            <div>Target: <span class="text-emerald-400 mono">+250 to +420 pts</span> • Stop-Loss: <span class="text-rose-400 mono">Close below Day VWAP</span></div>
+          <div class="text-[11px] text-slate-400 mt-1 max-w-xl mx-auto">
+            Market regime is choppy/divergent. Carrying overnight calls into broad distribution carries a 68% gap-down reversal risk. Keep account 100% in cash.
           </div>
         </div>
       </div>
@@ -726,17 +707,50 @@
         timeBadge.textContent = winStatus.status_label;
       }
 
-      const isQualified = btst.status === 'BTST_QUALIFIED';
+      const isQualified = btst.status === 'BTST_QUALIFIED' && btst.is_qualified;
+      const contractsGrid = document.getElementById('btst-contracts-grid');
 
-      if (btst.nifty_atm_contract) {
-        document.getElementById('nifty-contract-title').textContent = btst.nifty_atm_contract.contract_symbol;
-        const nAtmStrike = document.getElementById('nifty-atm-strike-ref');
-        if (nAtmStrike) nAtmStrike.textContent = `${btst.nifty_atm_contract.atm_strike} CE`;
-      }
-      if (btst.sensex_atm_contract) {
-        document.getElementById('sensex-contract-title').textContent = btst.sensex_atm_contract.contract_symbol;
-        const sAtmStrike = document.getElementById('sensex-atm-strike-ref');
-        if (sAtmStrike) sAtmStrike.textContent = `${btst.sensex_atm_contract.atm_strike} CE`;
+      if (isQualified && btst.nifty_atm_contract && btst.sensex_atm_contract) {
+        contractsGrid.innerHTML = `
+          <!-- NIFTY ATM OPTION CARD -->
+          <div class="p-4 rounded-xl bg-emerald-950/40 border border-emerald-500/50 relative">
+            <div class="flex items-center justify-between pb-2 border-b border-emerald-900/50">
+              <span class="text-xs font-bold text-white mono">${btst.nifty_atm_contract.contract_symbol}</span>
+              <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-900 text-emerald-300 font-mono font-bold border border-emerald-600/40">
+                🎯 ACTIVE BTST CONTRACT
+              </span>
+            </div>
+            <div class="text-xs text-slate-300 mt-2 space-y-1">
+              <div>Spot: <b class="text-white mono">${btst.nifty_atm_contract.spot_price}</b> • Strike: <b class="text-emerald-300 mono">${btst.nifty_atm_contract.atm_strike} CE</b> (Step 50)</div>
+              <div>Target: <span class="text-emerald-400 mono font-bold">${btst.nifty_atm_contract.target_index_points}</span> • SL: <span class="text-rose-400 mono">${btst.nifty_atm_contract.stop_loss_invalidation}</span></div>
+            </div>
+          </div>
+
+          <!-- SENSEX ATM OPTION CARD -->
+          <div class="p-4 rounded-xl bg-emerald-950/40 border border-emerald-500/50 relative">
+            <div class="flex items-center justify-between pb-2 border-b border-emerald-900/50">
+              <span class="text-xs font-bold text-white mono">${btst.sensex_atm_contract.contract_symbol}</span>
+              <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-900 text-emerald-300 font-mono font-bold border border-emerald-600/40">
+                🎯 ACTIVE BTST CONTRACT
+              </span>
+            </div>
+            <div class="text-xs text-slate-300 mt-2 space-y-1">
+              <div>Spot: <b class="text-white mono">${btst.sensex_atm_contract.spot_price}</b> • Strike: <b class="text-emerald-300 mono">${btst.sensex_atm_contract.atm_strike} CE</b> (Step 100)</div>
+              <div>Target: <span class="text-emerald-400 mono font-bold">${btst.sensex_atm_contract.target_index_points}</span> • SL: <span class="text-rose-400 mono">${btst.sensex_atm_contract.stop_loss_invalidation}</span></div>
+            </div>
+          </div>
+        `;
+      } else {
+        contractsGrid.innerHTML = `
+          <div class="col-span-full p-4 rounded-xl bg-rose-950/30 border border-rose-900/50 text-center">
+            <div class="text-rose-400 font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-1.5">
+              <span>🚫</span> <span>OVERNIGHT OPTIONS STRICTLY BARRED (NO CONTRACTS TO CARRY)</span>
+            </div>
+            <div class="text-[11px] text-slate-400 mt-1 max-w-xl mx-auto">
+              Market regime is choppy/divergent. Carrying overnight calls into broad distribution carries a 68% gap-down reversal risk. Keep account 100% in cash.
+            </div>
+          </div>
+        `;
       }
 
       if (isQualified) {
