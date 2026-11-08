@@ -14,7 +14,24 @@ import asyncio
 import datetime
 import json
 import os
+import sys
 from pathlib import Path
+
+# Ensure root and src directories are in sys.path
+_CURRENT_FILE = Path(__file__).resolve()
+_APP_ROOT = _CURRENT_FILE.parent.parent.parent
+_SRC_DIR = _CURRENT_FILE.parent.parent
+
+for _p in [str(_APP_ROOT), str(_SRC_DIR)]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+try:
+    import finplus_index_breadth
+except ImportError:
+    import src as _src
+    sys.modules["finplus_index_breadth"] = _src
+
 from typing import Any, Dict, List
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
