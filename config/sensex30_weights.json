@@ -1,0 +1,38 @@
+{
+  "description": "BSE SENSEX 30 Official Constituent Weights Specification",
+  "as_of": "2026-11-01",
+  "total_constituents": 30,
+  "weights": {
+    "HDFCBANK": 13.85,
+    "RELIANCE": 11.20,
+    "ICICIBANK": 9.45,
+    "INFY": 6.72,
+    "ITC": 5.10,
+    "TCS": 4.85,
+    "LT": 4.65,
+    "BHARTIARTL": 4.50,
+    "AXISBANK": 3.95,
+    "KOTAKBANK": 3.42,
+    "SBIN": 3.35,
+    "M&M": 3.05,
+    "BAJFINANCE": 2.60,
+    "MARUTI": 2.25,
+    "HCLTECH": 2.10,
+    "SUNPHARMA": 2.02,
+    "TITAN": 1.95,
+    "TATAMOTORS": 1.90,
+    "ASIANPAINT": 1.75,
+    "NTPC": 1.70,
+    "POWERGRID": 1.65,
+    "TATASTEEL": 1.58,
+    "ULTRACEMCO": 1.50,
+    "BAJAJFINSV": 1.42,
+    "NESTLEIND": 1.15,
+    "TECHM": 1.05,
+    "HINDUNILVR": 1.02,
+    "WIPRO": 0.98,
+    "INDUSINDBK": 0.52,
+    "JSWSTEEL": 0.50
+  }
+}
+

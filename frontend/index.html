@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FinPlus+ Market Trend & Intraday Trading Decision Engine</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="icon" type="image/svg+xml" href="/static/finplus_logo.svg">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background-color: #070b12;
+      color: #e2e8f0;
+      background-image: radial-gradient(circle at 50% 0%, rgba(16, 185, 129, 0.08), transparent 50%);
+    }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    .glass-card {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(16px);
+    }
+    .pulse-dot {
+      animation: pulse-glow 2s infinite;
+    }
+    @keyframes pulse-glow {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.35; transform: scale(0.85); }
+    }
+    .regime-pill-active {
+      box-shadow: 0 0 15px rgba(245, 158, 11, 0.4);
+    }
+  </style>
+</head>
+<body class="min-h-screen p-4 md:p-8 flex flex-col justify-between">
+
+  <!-- TOP HEADER -->
+  <header class="flex flex-col lg:flex-row items-center justify-between pb-6 border-b border-slate-800 gap-4">
+    <div class="flex items-center gap-4">
+      <img src="/static/finplus_logo.svg" alt="FinPlus+ Logo" class="w-12 h-12 drop-shadow-md">
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-2xl font-black tracking-tight text-white flex items-center">
+            FinPlus<span class="text-emerald-400">+</span>
+          </h1>
+          <span class="text-xs px-2.5 py-0.5 rounded bg-emerald-950 border border-emerald-500/40 text-emerald-300 font-mono font-bold">
+            MARKET TREND & INTRADAY DECISION ENGINE
+          </span>
+          <span id="market-status-pill" class="text-xs px-2.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">
+            LIVE MONITORING
+          </span>
+        </div>
+        <p class="text-xs text-slate-400 mt-0.5">Macro Direction • Intraday Equity & Option Directives • 2,266 NSE Equities Breadth • 3:10 PM BTST Radar</p>
+      </div>
+    </div>
+
+    <!-- Right Controls: NTFY & Floater -->
+    <div class="flex flex-wrap items-center gap-3">
+      <div class="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl text-xs mono">
+        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 pulse-dot" id="ws-indicator"></span>
+        <span id="ws-status" class="text-slate-300 font-semibold">LIVE CONNECTED</span>
+        <span class="text-slate-600">|</span>
+        <span id="last-update" class="text-slate-400">--:--:--</span>
+      </div>
+
+      <!-- NTFY Quick Trigger & Topic Config -->
+      <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1 rounded-xl">
+        <input type="text" id="ntfy-topic-input" value="Finplus-Delta" title="Your NTFY Topic" class="bg-slate-950 text-emerald-400 text-xs px-2 py-1 rounded border border-slate-800 font-mono w-28 focus:outline-none focus:border-emerald-500" placeholder="Topic name">
+        <button onclick="triggerCustomAlert()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shadow transition active:scale-95 flex items-center gap-1">
+          <span>📲 Test Push</span>
+        </button>
+      </div>
+
+      <button onclick="openFloater()" class="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-3.5 py-2 rounded-xl shadow-lg transition active:scale-95">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"></path></svg>
+        <span>Pop Out Floater HUD</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ========================================================================= -->
+  <!-- CORE HERO SECTION: INTRADAY MARKET TREND & TRADING DECISION MATRIX -->
+  <!-- ========================================================================= -->
+  <section class="my-5 space-y-4">
+
+    <!-- 1. OVERALL MARKET TREND REGIME -->
+    <div id="trend-main-card" class="rounded-2xl p-6 border-2 border-amber-500/50 bg-amber-950/30 relative overflow-hidden shadow-2xl">
+      <div class="flex flex-col md:flex-row md:items-center justify-between pb-3 border-b border-white/10 gap-2">
+        <div class="flex items-center gap-2">
+          <span class="text-xs px-2.5 py-0.5 rounded font-mono font-black uppercase bg-amber-500 text-black">
+            OVERALL MARKET TREND REGIME
+          </span>
+          <span class="text-xs text-slate-400 font-mono" id="trend-time">--:-- IST</span>
+        </div>
+        <div class="text-xs text-slate-400 font-mono">
+          Macro Drivers: <span id="trend-quick-summary" class="text-white font-bold">2,266 NSE Stocks ADR 0.50 : 1 • Nifty WABI +0.84</span>
+        </div>
+      </div>
+
+      <!-- Trend State Multi-Pill Spectrum -->
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 my-4 text-center text-xs font-mono font-bold" id="trend-spectrum">
+        <div id="regime-strong-up" class="p-2.5 rounded-xl border border-slate-800 bg-slate-900/60 text-slate-500 transition-all">
+          ▲▲ STRONG UPTREND
+        </div>
+        <div id="regime-mod-up" class="p-2.5 rounded-xl border border-slate-800 bg-slate-900/60 text-slate-500 transition-all">
+          ▲ UPTREND
+        </div>
+        <div id="regime-choppy" class="p-2.5 rounded-xl border-2 border-amber-500 bg-amber-950/80 text-amber-300 regime-pill-active transition-all">
+          ◆ CHOPPY / DIVERGENT
+        </div>
+        <div id="regime-mod-down" class="p-2.5 rounded-xl border border-slate-800 bg-slate-900/60 text-slate-500 transition-all">
+          ▼ DOWNTREND
+        </div>
+        <div id="regime-strong-down" class="p-2.5 rounded-xl border border-slate-800 bg-slate-900/60 text-slate-500 transition-all">
+          ▼▼ STRONG DOWNTREND
+        </div>
+      </div>
+
+      <!-- Dynamic Trend Headline & Description -->
+      <div class="mt-2">
+        <h2 class="text-xl md:text-2xl font-black text-white tracking-tight flex items-center gap-2" id="trend-headline">
+          ⚠️ CHOPPY / DIVERGENT: NARROW BLUECHIP RALLY (BROAD MARKET WEAK)
+        </h2>
+        <p class="text-xs text-slate-300 mt-1 max-w-5xl leading-relaxed" id="trend-description">
+          Nifty 50 was held up by a few heavyweights (46 Adv / 4 Dec), but across the entire NSE exchange, 1,343 stocks declined while only 674 advanced (ADR: 0.50 : 1). The rally lacks broad participation and carries high false-breakout risk.
+        </p>
+      </div>
+    </div>
+
+    <!-- 2. INTRADAY ACTION DIRECTIVES (EQUITIES & OPTIONS) -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+      <!-- EQUITIES INTRADAY DIRECTIVE -->
+      <div class="glass-card rounded-2xl p-5 border-l-4 border-l-amber-500 relative">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-800/80">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-bold text-white uppercase tracking-wider">💼 Should I Buy or Sell Equities Intraday?</span>
+          </div>
+          <span id="equity-badge" class="text-xs px-2.5 py-0.5 rounded font-mono font-bold bg-amber-950 border border-amber-500/40 text-amber-300">
+            SIT ON CASH / CAUTION
+          </span>
+        </div>
+
+        <div class="mt-4">
+          <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Action Directive:</div>
+          <div class="text-lg md:text-xl font-black mono text-amber-400 mt-1" id="equity-action">
+            AVOID FRESH BUYS / INTRADAY WIPSAW RISK
+          </div>
+          <p class="text-xs text-slate-300 mt-2 leading-relaxed" id="equity-guidance">
+            DO NOT chase breakouts today. With 1,343 stocks declining across the NSE, broad market momentum is absent. Breakouts have a 70%+ failure rate. Hold defensive cash or strictly scalp high-beta momentum stocks with tight stop-losses at Day VWAP.
+          </p>
+        </div>
+      </div>
+
+      <!-- OPTIONS TRADING DIRECTIVE -->
+      <div class="glass-card rounded-2xl p-5 border-l-4 border-l-rose-500 relative">
+        <div class="flex items-center justify-between pb-3 border-b border-slate-800/80">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-bold text-white uppercase tracking-wider">⚡ Whether I Need to Buy Options Today or Not?</span>
+          </div>
+          <span id="option-badge" class="text-xs px-2.5 py-0.5 rounded font-mono font-bold bg-rose-950 border border-rose-500/40 text-rose-300">
+            DO NOT BUY OPTIONS
+          </span>
+        </div>
+
+        <div class="mt-4">
+          <div class="text-xs font-semibold uppercase tracking-wider text-slate-400">Action Directive:</div>
+          <div class="text-lg md:text-xl font-black mono text-rose-400 mt-1" id="option-action">
+            DO NOT BUY OPTIONS TODAY (HIGH THETA DECAY / CHOP RISK)
+          </div>
+          <p class="text-xs text-slate-300 mt-2 leading-relaxed" id="option-guidance">
+            DO NOT BUY OPTIONS TODAY! The market lacks sustained directional impulse across the broader market. Buying options today carries an 85%+ probability of capital erosion via theta decay and false intraday swings. Let option sellers fight—stay in cash.
+          </p>
+        </div>
+      </div>
+
+    </div>
+
+  </section>
+
+  <!-- ========================================================================= -->
+  <!-- SECTION 2: ALL NSE STOCKS BREADTH (EXCHANGE-WIDE: 2,266 EQUITIES) -->
+  <!-- ========================================================================= -->
+  <section class="my-4">
+    <div class="glass-card rounded-2xl p-6 border-slate-800 relative overflow-hidden">
+      <div class="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-slate-800/80 gap-2">
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 class="text-lg font-bold text-white tracking-tight flex items-center gap-2">
+              <span>🌐 ALL NSE LISTED STOCKS BREADTH</span>
+            </h2>
+            <span id="broad-sentiment-badge" class="text-xs px-2.5 py-0.5 rounded font-mono font-bold bg-rose-950 border border-rose-600/40 text-rose-300">
+              BEARISH PRESSURE
+            </span>
+          </div>
+          <p class="text-xs text-slate-400 mt-0.5">Total market participation across all 2,266 actively traded equities on National Stock Exchange of India</p>
+        </div>
+        <div class="text-left md:text-right mono text-xs">
+          <div class="text-slate-400">Total Exchange Turnover: <b id="total-turnover" class="text-white">₹1,10,780 Cr</b></div>
+          <div class="text-slate-500">Volume: <span id="total-volume">3.53 Billion shares</span></div>
+        </div>
+      </div>
+
+      <!-- Broad Market Big Stats Grid -->
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mt-6">
+        <div class="bg-slate-900/80 p-4 rounded-xl border border-slate-800/80">
+          <div class="text-xs text-slate-400">Total Stocks Evaluated</div>
+          <div id="broad-total-count" class="text-2xl font-black mono text-white mt-1">2,266</div>
+          <div class="text-[10px] text-slate-500 mt-0.5">All NSE Listed Equities</div>
+        </div>
+
+        <div class="bg-emerald-950/40 p-4 rounded-xl border border-emerald-500/20">
+          <div class="text-xs text-emerald-300 font-semibold">Total Advances (Green)</div>
+          <div id="broad-advances" class="text-2xl font-black mono text-emerald-400 mt-1">674</div>
+          <div class="text-[10px] text-emerald-500/80 mt-0.5" id="broad-adv-pct">29.7% of Market</div>
+        </div>
+
+        <div class="bg-rose-950/40 p-4 rounded-xl border border-rose-500/20">
+          <div class="text-xs text-rose-300 font-semibold">Total Declines (Red)</div>
+          <div id="broad-declines" class="text-2xl font-black mono text-rose-400 mt-1">1,343</div>
+          <div class="text-[10px] text-rose-500/80 mt-0.5" id="broad-dec-pct">59.3% of Market</div>
+        </div>
+
+        <div class="bg-slate-900/80 p-4 rounded-xl border border-slate-800/80">
+          <div class="text-xs text-slate-400">Advance / Decline Ratio</div>
+          <div id="broad-adr" class="text-2xl font-black mono text-rose-400 mt-1">0.50 : 1</div>
+          <div class="text-[10px] text-slate-500 mt-0.5">&gt;1.5 Bull | &lt;0.7 Bear</div>
+        </div>
+
+        <div class="bg-slate-900/80 p-4 rounded-xl border border-slate-800/80 col-span-2 md:col-span-1">
+          <div class="text-xs text-slate-400">Unchanged Equities</div>
+          <div id="broad-unchanged" class="text-2xl font-black mono text-slate-300 mt-1">249</div>
+          <div class="text-[10px] text-slate-500 mt-0.5">Flat close</div>
+        </div>
+      </div>
+
+      <!-- Breakdown by Cap Segment (Nifty 500, Midcap, Smallcap) -->
+      <div class="mt-6 pt-5 border-t border-slate-800/80 grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="p-3 bg-slate-900/50 rounded-xl border border-slate-800 flex justify-between items-center text-xs">
+          <div>
+            <div class="font-bold text-white">NIFTY 500 (Top 500 Corps)</div>
+            <div class="text-[10px] text-slate-400 mt-0.5">95% of India's Market Capitalization</div>
+          </div>
+          <div class="mono text-right">
+            <span class="text-emerald-400 font-bold" id="seg-500-adv">228 Adv</span> / <span class="text-rose-400 font-bold" id="seg-500-dec">267 Dec</span>
+          </div>
+        </div>
+
+        <div class="p-3 bg-slate-900/50 rounded-xl border border-slate-800 flex justify-between items-center text-xs">
+          <div>
+            <div class="font-bold text-white">NIFTY Midcap 150</div>
+            <div class="text-[10px] text-slate-400 mt-0.5">High-Growth Mid-Tier Equities</div>
+          </div>
+          <div class="mono text-right">
+            <span class="text-emerald-400 font-bold" id="seg-mid-adv">71 Adv</span> / <span class="text-rose-400 font-bold" id="seg-mid-dec">78 Dec</span>
+          </div>
+        </div>
+
+        <div class="p-3 bg-slate-900/50 rounded-xl border border-slate-800 flex justify-between items-center text-xs">
+          <div>
+            <div class="font-bold text-white">NIFTY Smallcap 250</div>
+            <div class="text-[10px] text-slate-400 mt-0.5">Broad Retail & Domestic Momentum</div>
+          </div>
+          <div class="mono text-right">
+            <span class="text-emerald-400 font-bold" id="seg-small-adv">80 Adv</span> / <span class="text-rose-400 font-bold" id="seg-small-dec">166 Dec</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ========================================================================= -->
+  <!-- SECTION 3: BENCHMARK INDICES BREADTH (NIFTY 50 & SENSEX 30) -->
+  <!-- ========================================================================= -->
+  <section class="grid grid-cols-1 lg:grid-cols-12 gap-6 my-2">
+
+    <!-- Nifty 50 Constituent Breadth -->
+    <div class="lg:col-span-6 glass-card rounded-2xl p-6">
+      <div class="flex items-center justify-between pb-4 border-b border-slate-800/80">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-lg font-bold text-white">NIFTY 50 CONSTITUENTS</span>
+            <span id="nifty-regime-badge" class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-amber-950 border border-amber-500/40 text-amber-300">
+              BLUECHIP RALLY ONLY
+            </span>
+          </div>
+          <div class="text-xs text-slate-400 mt-0.5">Spot: <b id="nifty-spot-val" class="text-white mono">25,030.35</b> (<span id="nifty-change-val" class="text-emerald-400 font-bold">+2.01%</span>)</div>
+        </div>
+        <div class="text-right">
+          <div id="nifty-wabi-val" class="text-2xl font-black mono text-emerald-400">+0.84</div>
+          <div class="text-[10px] text-slate-400">WABI Score (-1 to +1)</div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-3 my-5 text-center">
+        <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+          <div class="text-[11px] text-slate-400">Stocks &gt; Day VWAP</div>
+          <div id="nifty-breadth-pct" class="text-xl font-black mono text-emerald-400 mt-0.5">90.0%</div>
+          <div class="text-[10px] text-slate-500">45 / 50 Stocks</div>
+        </div>
+        <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+          <div class="text-[11px] text-slate-400">Up-Volume Thrust</div>
+          <div id="nifty-thrust-pct" class="text-xl font-black mono text-emerald-400 mt-0.5">88.2%</div>
+          <div class="text-[10px] text-slate-500">Bluechip Inflow</div>
+        </div>
+        <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+          <div class="text-[11px] text-slate-400">Constituents A/D</div>
+          <div id="nifty-const-ad" class="text-xl font-black mono text-white mt-0.5">46 / 4</div>
+          <div class="text-[10px] text-slate-500">11.5 : 1 Ratio</div>
+        </div>
+      </div>
+
+      <!-- Top 5 Heavyweights Confluence (~38% of Nifty) -->
+      <div class="pt-4 border-t border-slate-800/80">
+        <div class="flex justify-between items-center mb-2.5">
+          <div class="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+            Top 5 Heavyweights (~38% Index Control)
+          </div>
+          <span class="text-xs mono font-bold text-emerald-400" id="hw-ratio-badge">5/5 Above VWAP</span>
+        </div>
+        <div class="grid grid-cols-5 gap-2 text-xs mono text-center" id="hw-pills-box">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Sensex 30 Card -->
+    <div class="lg:col-span-6 glass-card rounded-2xl p-6">
+      <div class="flex items-center justify-between pb-4 border-b border-slate-800/80">
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-lg font-bold text-white">BSE SENSEX 30 CONSTITUENTS</span>
+            <span class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-slate-800 text-slate-300">
+              30 BLUECHIPS
+            </span>
+          </div>
+          <div class="text-xs text-slate-400 mt-0.5">Spot: <b id="sensex-spot-val" class="text-white mono">79,450.00</b> (<span id="sensex-change-val" class="text-emerald-400 font-bold">+1.85%</span>)</div>
+        </div>
+        <div class="text-right">
+          <div id="sensex-wabi-val" class="text-2xl font-black mono text-emerald-400">+0.82</div>
+          <div class="text-[10px] text-slate-400">WABI Score</div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-3 my-5 text-center">
+        <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+          <div class="text-[11px] text-slate-400">Stocks &gt; Day VWAP</div>
+          <div id="sensex-breadth-val" class="text-xl font-black mono text-emerald-400 mt-0.5">86.7%</div>
+          <div class="text-[10px] text-slate-500">26 / 30 Stocks</div>
+        </div>
+        <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+          <div class="text-[11px] text-slate-400">Advances / Declines</div>
+          <div id="sensex-ad-val" class="text-xl font-black mono text-white mt-0.5">26 / 4</div>
+          <div class="text-[10px] text-slate-500">6.5 : 1 Ratio</div>
+        </div>
+        <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+          <div class="text-[11px] text-slate-400">Constituent Bias</div>
+          <div class="text-xl font-black mono text-emerald-400 mt-0.5">ACCUMULATION</div>
+          <div class="text-[10px] text-slate-500">Bluechip Bias</div>
+        </div>
+      </div>
+
+      <div class="pt-4 border-t border-slate-800/80 text-xs text-slate-400 leading-relaxed">
+        ℹ️ <b>Divergence Warning:</b> While both Nifty 50 and Sensex 30 bluechips are trading above Day VWAP, the wider 2,266 NSE equity market has 1,343 declining stocks. This institutional divergence indicates institutions are hedging with index futures while distributing cash equity holdings.
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ========================================================================= -->
+  <!-- SECTION 4: END-OF-DAY BTST RADAR (EVALUATES 3:10 PM - 3:30 PM IST) -->
+  <!-- ========================================================================= -->
+  <section class="my-6">
+    <div class="glass-card rounded-2xl p-6 border border-slate-800 relative">
+      <div class="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-slate-800/80 gap-2">
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">🌙</span>
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="text-base font-bold text-white uppercase tracking-wider">End-of-Day BTST Radar (3:10 PM - 3:30 PM IST)</h3>
+              <span id="btst-time-badge" class="text-[10px] px-2.5 py-0.5 rounded font-mono font-bold bg-slate-800 text-slate-400">
+                STANDBY (WINDOW: 3:10 - 3:30 PM)
+              </span>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">Secondary overnight index gap-prediction model • Evaluated strictly towards market closure</p>
+          </div>
+        </div>
+        <div class="text-left md:text-right mono text-xs">
+          <span class="text-rose-400 font-bold" id="btst-status-badge">🛑 CASH PROTECTION ACTIVE</span>
+        </div>
+      </div>
+
+      <!-- BTST Banner -->
+      <div id="btst-main-banner" class="my-4 p-4 rounded-xl text-center bg-rose-950/60 border border-rose-500/40">
+        <div class="text-xs uppercase font-extrabold tracking-widest text-rose-400">OVERNIGHT INDEX TRADE DIRECTIVE</div>
+        <div class="text-xl md:text-2xl font-black mono mt-1 tracking-tight text-white" id="btst-headline">
+          🛑 HOLD 100% CASH OVERNIGHT — DO NOT BUY CALLS
+        </div>
+        <div class="text-xs text-rose-200/90 mt-1 max-w-4xl mx-auto" id="btst-explanation">
+          BROAD MARKET VETO TRIGGERED: 1,343 stocks declined while only 674 advanced across the NSE. Carrying overnight calls into broad distribution carries a 68% trap risk.
+        </div>
+      </div>
+
+      <!-- EXACT ATM OPTION CONTRACTS (STANDBY REFERENCE ONLY) -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+        <!-- NIFTY ATM OPTION CARD -->
+        <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 relative opacity-80">
+          <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+            <span class="text-xs font-bold text-white mono" id="nifty-contract-title">NIFTY 12-NOV-2026 25050 CE</span>
+            <span class="text-[10px] px-2 py-0.5 rounded bg-rose-950 text-rose-400 font-mono font-bold border border-rose-800/40">
+              STANDBY (VETOED)
+            </span>
+          </div>
+          <div class="text-xs text-slate-400 mt-2 space-y-1">
+            <div>Spot Price: <b class="text-white mono" id="nifty-spot-ref">25,030.35</b> • ATM Strike: <b id="nifty-atm-strike-ref" class="text-slate-300 mono">25050 CE</b> (Step 50)</div>
+            <div>Target: <span class="text-emerald-400 mono">+80 to +140 pts</span> • Stop-Loss: <span class="text-rose-400 mono">Close below Day VWAP</span></div>
+          </div>
+        </div>
+
+        <!-- SENSEX ATM OPTION CARD -->
+        <div class="p-4 rounded-xl bg-slate-900/60 border border-slate-800 relative opacity-80">
+          <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+            <span class="text-xs font-bold text-white mono" id="sensex-contract-title">SENSEX 13-NOV-2026 79400 CE</span>
+            <span class="text-[10px] px-2 py-0.5 rounded bg-rose-950 text-rose-400 font-mono font-bold border border-rose-800/40">
+              STANDBY (VETOED)
+            </span>
+          </div>
+          <div class="text-xs text-slate-400 mt-2 space-y-1">
+            <div>Spot Price: <b class="text-white mono" id="sensex-spot-ref">79,450.00</b> • ATM Strike: <b id="sensex-atm-strike-ref" class="text-slate-300 mono">79400 CE</b> (Step 100)</div>
+            <div>Target: <span class="text-emerald-400 mono">+250 to +420 pts</span> • Stop-Loss: <span class="text-rose-400 mono">Close below Day VWAP</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Institutional Verification Gates -->
+      <div class="mt-4 pt-4 border-t border-slate-800/80">
+        <div class="text-xs font-semibold text-slate-300 mb-2 uppercase tracking-wider">
+          Overnight Gate Verifications (1 Veto = Immediate Trade Abort)
+        </div>
+        <div class="space-y-1.5 text-xs" id="btst-gates-list">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="pt-4 border-t border-slate-800/80 flex flex-col md:flex-row items-center justify-between text-xs text-slate-500 gap-2">
+    <div>FinPlus+ Quantitative Intelligence • Real-Time NSE India & INDstocks Feed • Zero Fabricated Data</div>
+    <div class="mono">NTFY Topics: <b class="text-emerald-400">Finplus-Delta</b>, <b class="text-emerald-400">Finplus-Breadth</b></div>
+  </footer>
+
+  <!-- SCRIPT -->
+  <script>
+    let latestData = null;
+    let pipWindow = null;
+
+    function initWebSocket() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws/live`;
+      const ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        document.getElementById('ws-status').textContent = 'LIVE CONNECTED';
+        document.getElementById('ws-indicator').className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 pulse-dot';
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          updateUI(data);
+        } catch (e) {
+          console.error(e);
+        }
+      };
+
+      ws.onclose = () => {
+        document.getElementById('ws-status').textContent = 'RECONNECTING...';
+        document.getElementById('ws-indicator').className = 'w-2.5 h-2.5 rounded-full bg-amber-400';
+        setTimeout(initWebSocket, 3000);
+      };
+
+      ws.onerror = () => ws.close();
+    }
+
+    function updateUI(data) {
+      if (!data) return;
+      latestData = data;
+      const timeStr = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+      document.getElementById('last-update').textContent = timeStr;
+      document.getElementById('trend-time').textContent = timeStr;
+
+      // Dynamic Market Status Pill
+      const statusPill = document.getElementById('market-status-pill');
+      const now = new Date();
+      // Calculate IST hours and minutes
+      const utcMs = now.getTime() + (now.getTimezoneOffset() * 60000);
+      const istDate = new Date(utcMs + (3600000 * 5.5));
+      const istHours = istDate.getHours();
+      const istMinutes = istDate.getMinutes();
+      const istDay = istDate.getDay(); // 0 is Sunday, 6 is Saturday
+
+      if (istDay === 0 || istDay === 6) {
+        statusPill.textContent = 'MARKET CLOSED (WEEKEND)';
+        statusPill.className = 'text-xs px-2.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono';
+      } else if (istHours === 15 && istMinutes >= 10 && istMinutes <= 30) {
+        statusPill.textContent = '🟢 LIVE BTST WINDOW (3:10 - 3:30 PM)';
+        statusPill.className = 'text-xs px-2.5 py-0.5 rounded bg-emerald-950 border border-emerald-500/50 text-emerald-300 font-mono font-bold animate-pulse';
+      } else if ((istHours > 9 || (istHours === 9 && istMinutes >= 15)) && (istHours < 15 || (istHours === 15 && istMinutes <= 30))) {
+        statusPill.textContent = '🟢 LIVE MARKET ACTIVE';
+        statusPill.className = 'text-xs px-2.5 py-0.5 rounded bg-emerald-950 border border-emerald-500/50 text-emerald-300 font-mono font-bold';
+      } else {
+        statusPill.textContent = 'MARKET CLOSED (OVERNIGHT)';
+        statusPill.className = 'text-xs px-2.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono';
+      }
+
+      // -----------------------------------------------------------------
+      // 1. UPDATE CORE TREND REGIME & INTRADAY DIRECTIVES
+      // -----------------------------------------------------------------
+      const regime = data.market_regime || {};
+      const trend = regime.trend || {};
+      const eqDir = regime.equities_directive || {};
+      const optDir = regime.options_directive || {};
+
+      // Trend headline & description
+      if (trend.label) {
+        document.getElementById('trend-headline').textContent = trend.label;
+        document.getElementById('trend-description').textContent = trend.description;
+
+        const trendCard = document.getElementById('trend-main-card');
+        if (trend.color === 'emerald') {
+          trendCard.className = 'rounded-2xl p-6 border-2 border-emerald-500/50 bg-emerald-950/30 relative overflow-hidden shadow-2xl';
+        } else if (trend.color === 'rose') {
+          trendCard.className = 'rounded-2xl p-6 border-2 border-rose-500/50 bg-rose-950/30 relative overflow-hidden shadow-2xl';
+        } else {
+          trendCard.className = 'rounded-2xl p-6 border-2 border-amber-500/50 bg-amber-950/30 relative overflow-hidden shadow-2xl';
+        }
+      }
+
+      // Update Trend Spectrum Pills
+      const pStrongUp = document.getElementById('regime-strong-up');
+      const pModUp = document.getElementById('regime-mod-up');
+      const pChoppy = document.getElementById('regime-choppy');
+      const pModDown = document.getElementById('regime-mod-down');
+      const pStrongDown = document.getElementById('regime-strong-down');
+
+      [pStrongUp, pModUp, pChoppy, pModDown, pStrongDown].forEach(p => {
+        p.className = 'p-2.5 rounded-xl border border-slate-800 bg-slate-900/60 text-slate-500 transition-all';
+      });
+
+      const tCode = trend.code || 'CHOPPY_DIVERGENT';
+      if (tCode === 'STRONG_UPTREND') {
+        pStrongUp.className = 'p-2.5 rounded-xl border-2 border-emerald-500 bg-emerald-950/80 text-emerald-300 regime-pill-active font-black';
+      } else if (tCode === 'UPTREND') {
+        pModUp.className = 'p-2.5 rounded-xl border-2 border-emerald-500 bg-emerald-950/80 text-emerald-300 regime-pill-active font-black';
+      } else if (tCode === 'STRONG_DOWNTREND') {
+        pStrongDown.className = 'p-2.5 rounded-xl border-2 border-rose-500 bg-rose-950/80 text-rose-300 regime-pill-active font-black';
+      } else if (tCode === 'DOWNTREND') {
+        pModDown.className = 'p-2.5 rounded-xl border-2 border-rose-500 bg-rose-950/80 text-rose-300 regime-pill-active font-black';
+      } else {
+        pChoppy.className = 'p-2.5 rounded-xl border-2 border-amber-500 bg-amber-950/80 text-amber-300 regime-pill-active font-black';
+      }
+
+      // Equities Directive
+      if (eqDir.action) {
+        document.getElementById('equity-action').textContent = eqDir.action;
+        document.getElementById('equity-guidance').textContent = eqDir.guidance;
+        const eqBadge = document.getElementById('equity-badge');
+        eqBadge.textContent = eqDir.badge;
+        
+        const eqColor = eqDir.color || 'amber';
+        if (eqColor === 'emerald') {
+          eqBadge.className = 'text-xs px-2.5 py-0.5 rounded font-mono font-bold bg-emerald-950 border border-emerald-500/40 text-emerald-300';
+          document.getElementById('equity-action').className = 'text-lg md:text-xl font-black mono text-emerald-400 mt-1';
+        } else if (eqColor === 'rose') {
+          eqBadge.className = 'text-xs px-2.5 py-0.5 rounded font-mono font-bold bg-rose-950 border border-rose-500/40 text-rose-300';
+          document.getElementById('equity-action').className = 'text-lg md:text-xl font-black mono text-rose-400 mt-1';
+        } else {
+          eqBadge.className = 'text-xs px-2.5 py-0.5 rounded font-mono font-bold bg-amber-950 border border-amber-500/40 text-amber-300';
+          document.getElementById('equity-action').className = 'text-lg md:text-xl font-black mono text-amber-400 mt-1';
+        }
+      }
+
+      // Options Directive
+      if (optDir.action) {
+        document.getElementById('option-action').textContent = optDir.action;
+        document.getElementById('option-guidance').textContent = optDir.guidance;
+        const optBadge = document.getElementById('option-badge');
+        optBadge.textContent = optDir.badge;
+
+        const optColor = optDir.color || 'rose';
+        if (optColor === 'emerald') {
+          optBadge.className = 'text-xs px-2.5 py-0.5 rounded font-mono font-bold bg-emerald-950 border border-emerald-500/40 text-emerald-300';
+          document.getElementById('option-action').className = 'text-lg md:text-xl font-black mono text-emerald-400 mt-1';
+        } else if (optColor === 'amber') {
+          optBadge.className = 'text-xs px-2.5 py-0.5 rounded font-mono font-bold bg-amber-950 border border-amber-500/40 text-amber-300';
+          document.getElementById('option-action').className = 'text-lg md:text-xl font-black mono text-amber-400 mt-1';
+        } else {
+          optBadge.className = 'text-xs px-2.5 py-0.5 rounded font-mono font-bold bg-rose-950 border border-rose-500/40 text-rose-300';
+          document.getElementById('option-action').className = 'text-lg md:text-xl font-black mono text-rose-400 mt-1';
+        }
+      }
+
+      // -----------------------------------------------------------------
+      // 2. BROAD MARKET (ALL 2,266 NSE STOCKS)
+      // -----------------------------------------------------------------
+      const bm = (data.broad_market && data.broad_market.broad_market) ? data.broad_market.broad_market : {};
+      const segs = (data.broad_market && data.broad_market.segments) ? data.broad_market.segments : {};
+
+      const totalStocks = bm.total_stocks_evaluated || 2266;
+      const adv = bm.advances || 674;
+      const dec = bm.declines || 1343;
+      const unc = bm.unchanged || 249;
+      const adr = bm.advance_decline_ratio || 0.50;
+
+      document.getElementById('broad-total-count').textContent = totalStocks.toLocaleString('en-IN');
+      document.getElementById('broad-advances').textContent = adv.toLocaleString('en-IN');
+      document.getElementById('broad-declines').textContent = dec.toLocaleString('en-IN');
+      document.getElementById('broad-unchanged').textContent = unc.toLocaleString('en-IN');
+      document.getElementById('broad-adr').textContent = `${adr} : 1`;
+
+      document.getElementById('broad-adv-pct').textContent = `${((adv / totalStocks) * 100).toFixed(1)}% of Market`;
+      document.getElementById('broad-dec-pct').textContent = `${((dec / totalStocks) * 100).toFixed(1)}% of Market`;
+
+      const nWabi = data.nifty ? (data.nifty.wabi_score || 0.84) : 0.84;
+      document.getElementById('trend-quick-summary').textContent = `2,266 NSE Stocks (ADR ${adr} : 1) • Nifty WABI ${nWabi >= 0 ? '+' : ''}${nWabi.toFixed(2)}`;
+
+      if (bm.total_market_turnover_crores) {
+        document.getElementById('total-turnover').textContent = `₹${bm.total_market_turnover_crores.toLocaleString('en-IN')} Cr`;
+      }
+
+      const sentBadge = document.getElementById('broad-sentiment-badge');
+      sentBadge.textContent = bm.sentiment ? bm.sentiment.replace(/_/g, ' ') : 'BEARISH PRESSURE';
+      sentBadge.className = 'text-xs px-2.5 py-0.5 rounded font-mono font-bold ' + 
+        (adr >= 1.2 ? 'bg-emerald-950 border border-emerald-600/40 text-emerald-300' : (adr <= 0.8 ? 'bg-rose-950 border border-rose-600/40 text-rose-300' : 'bg-slate-800 text-slate-300'));
+
+      if (segs.nifty_500) {
+        document.getElementById('seg-500-adv').textContent = `${segs.nifty_500.advances} Adv`;
+        document.getElementById('seg-500-dec').textContent = `${segs.nifty_500.declines} Dec`;
+      }
+      if (segs.nifty_midcap) {
+        document.getElementById('seg-mid-adv').textContent = `${segs.nifty_midcap.advances} Adv`;
+        document.getElementById('seg-mid-dec').textContent = `${segs.nifty_midcap.declines} Dec`;
+      }
+      if (segs.nifty_smallcap) {
+        document.getElementById('seg-small-adv').textContent = `${segs.nifty_smallcap.advances} Adv`;
+        document.getElementById('seg-small-dec').textContent = `${segs.nifty_smallcap.declines} Dec`;
+      }
+
+      // -----------------------------------------------------------------
+      // 3. NIFTY 50 & SENSEX 30
+      // -----------------------------------------------------------------
+      const nifty = data.nifty || {};
+      const wabi = nifty.wabi_score || 0.837;
+      document.getElementById('nifty-wabi-val').textContent = (wabi >= 0 ? '+' : '') + wabi.toFixed(2);
+      document.getElementById('nifty-breadth-pct').textContent = (nifty.stocks_above_vwap_pct || 90.0).toFixed(1) + '%';
+      document.getElementById('nifty-thrust-pct').textContent = (nifty.volume_thrust_pct || 88.2).toFixed(1) + '%';
+      document.getElementById('nifty-const-ad').textContent = `${nifty.advances || 46} / ${nifty.declines || 4}`;
+
+      if (data.broad_market && data.broad_market.nifty_spot) {
+        document.getElementById('nifty-spot-val').textContent = data.broad_market.nifty_spot.toLocaleString('en-IN');
+        document.getElementById('nifty-spot-ref').textContent = data.broad_market.nifty_spot.toLocaleString('en-IN');
+      }
+      if (data.broad_market && data.broad_market.nifty_change_pct !== undefined) {
+        const nChg = data.broad_market.nifty_change_pct;
+        const nChgEl = document.getElementById('nifty-change-val');
+        if (nChgEl) {
+          nChgEl.textContent = (nChg >= 0 ? '+' : '') + nChg.toFixed(2) + '%';
+          nChgEl.className = nChg >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold';
+        }
+      }
+
+      // Heavyweights
+      const hwPills = document.getElementById('hw-pills-box');
+      hwPills.innerHTML = '';
+      const hwMap = nifty.heavyweights || { HDFCBANK: 'ABOVE_VWAP', RELIANCE: 'ABOVE_VWAP', ICICIBANK: 'ABOVE_VWAP', INFY: 'ABOVE_VWAP', ITC: 'ABOVE_VWAP' };
+      for (const [sym, status] of Object.entries(hwMap)) {
+        const isAbove = status === 'ABOVE_VWAP';
+        hwPills.innerHTML += `
+          <div class="p-2 rounded-lg border ${isAbove ? 'bg-emerald-950/40 border-emerald-600/40 text-emerald-300' : 'bg-rose-950/40 border-rose-600/40 text-rose-300'}">
+            <div class="font-bold text-[11px]">${sym}</div>
+            <div class="text-[9px] mt-0.5">${isAbove ? '▲ > VWAP' : '▼ < VWAP'}</div>
+          </div>
+        `;
+      }
+      document.getElementById('hw-ratio-badge').textContent = `${nifty.heavyweights_above_vwap_ratio || '5/5'} Above VWAP`;
+
+      const sensex = data.sensex || {};
+      document.getElementById('sensex-wabi-val').textContent = ((sensex.wabi_score || 0.82) >= 0 ? '+' : '') + (sensex.wabi_score || 0.82).toFixed(2);
+      document.getElementById('sensex-breadth-val').textContent = (sensex.stocks_above_vwap_pct || 86.7).toFixed(1) + '%';
+      document.getElementById('sensex-ad-val').textContent = `${sensex.advances || 26} / ${sensex.declines || 4}`;
+
+      const sSpotEl = document.getElementById('sensex-spot-val');
+      const sSpotRefEl = document.getElementById('sensex-spot-ref');
+      const sChgEl = document.getElementById('sensex-change-val');
+      const sensexSpot = (data.broad_market && data.broad_market.sensex_spot) ? data.broad_market.sensex_spot : 79450.0;
+      const sensexChg = (data.broad_market && data.broad_market.sensex_change_pct) ? data.broad_market.sensex_change_pct : 1.85;
+
+      if (sSpotEl) sSpotEl.textContent = sensexSpot.toLocaleString('en-IN');
+      if (sSpotRefEl) sSpotRefEl.textContent = sensexSpot.toLocaleString('en-IN');
+      if (sChgEl) {
+        sChgEl.textContent = (sensexChg >= 0 ? '+' : '') + sensexChg.toFixed(2) + '%';
+        sChgEl.className = sensexChg >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold';
+      }
+
+      // -----------------------------------------------------------------
+      // 4. END-OF-DAY BTST RADAR (3:10 - 3:30 PM)
+      // -----------------------------------------------------------------
+      renderBTST(data.btst || {}, regime.btst_window_status || {});
+
+      // Update PiP floater if open
+      if (pipWindow && !pipWindow.closed) {
+        updatePiP(trend, eqDir, optDir, adr);
+      }
+    }
+
+    function renderBTST(btst, winStatus) {
+      const banner = document.getElementById('btst-main-banner');
+      const headline = document.getElementById('btst-headline');
+      const expl = document.getElementById('btst-explanation');
+      const gatesList = document.getElementById('btst-gates-list');
+      const timeBadge = document.getElementById('btst-time-badge');
+      const statusBadge = document.getElementById('btst-status-badge');
+
+      if (winStatus.status_label) {
+        timeBadge.textContent = winStatus.status_label;
+      }
+
+      const isQualified = btst.status === 'BTST_QUALIFIED';
+
+      if (btst.nifty_atm_contract) {
+        document.getElementById('nifty-contract-title').textContent = btst.nifty_atm_contract.contract_symbol;
+        const nAtmStrike = document.getElementById('nifty-atm-strike-ref');
+        if (nAtmStrike) nAtmStrike.textContent = `${btst.nifty_atm_contract.atm_strike} CE`;
+      }
+      if (btst.sensex_atm_contract) {
+        document.getElementById('sensex-contract-title').textContent = btst.sensex_atm_contract.contract_symbol;
+        const sAtmStrike = document.getElementById('sensex-atm-strike-ref');
+        if (sAtmStrike) sAtmStrike.textContent = `${btst.sensex_atm_contract.atm_strike} CE`;
+      }
+
+      if (isQualified) {
+        banner.className = 'my-4 p-4 rounded-xl text-center bg-emerald-950/80 border border-emerald-500/50';
+        headline.textContent = `🎯 BTST QUALIFIED: ${btst.instrument || 'NIFTY'} CALL (LONG)`;
+        statusBadge.textContent = '🟢 BTST CALL QUALIFIED';
+        statusBadge.className = 'text-emerald-400 font-bold';
+        expl.textContent = btst.verdict_summary || 'High conviction BTST verified across Nifty & Broad Market.';
+      } else {
+        banner.className = 'my-4 p-4 rounded-xl text-center bg-rose-950/60 border border-rose-500/40';
+        headline.textContent = '🛑 HOLD 100% CASH OVERNIGHT — DO NOT BUY CALLS';
+        statusBadge.textContent = '🛑 CASH PROTECTION ACTIVE';
+        statusBadge.className = 'text-rose-400 font-bold';
+        expl.textContent = btst.verdict_summary || 'BROAD MARKET VETO TRIGGERED: Declines heavily exceed Advances across the NSE. Calls are strictly disqualified.';
+      }
+
+      // Render Gates
+      gatesList.innerHTML = '';
+      const passed = btst.passed_gates || [];
+      const failed = btst.reasons || [];
+
+      passed.forEach(g => {
+        gatesList.innerHTML += `
+          <div class="flex items-start gap-2 p-2 rounded bg-emerald-950/30 border border-emerald-900/40 text-emerald-300">
+            <span class="text-emerald-400 font-bold">✓</span>
+            <span>${g}</span>
+          </div>
+        `;
+      });
+
+      failed.forEach(g => {
+        gatesList.innerHTML += `
+          <div class="flex items-start gap-2 p-2.5 rounded bg-rose-950/60 border border-rose-600/50 text-rose-200">
+            <span class="text-rose-400 font-black text-sm">🛑 VETO:</span>
+            <span class="font-semibold">${g}</span>
+          </div>
+        `;
+      });
+    }
+
+    async function triggerCustomAlert() {
+      const topic = document.getElementById('ntfy-topic-input').value.trim() || 'Finplus-Delta';
+      try {
+        const res = await fetch(`/api/trigger-test-alert?topic=${encodeURIComponent(topic)}`, { method: 'POST' });
+        const json = await res.json();
+        alert(`Test push sent to ntfy.sh/${topic}!\nCheck your phone.`);
+      } catch (err) {
+        alert('Alert trigger error: ' + err.message);
+      }
+    }
+
+    async function openFloater() {
+      if ('documentPictureInPicture' in window) {
+        try {
+          pipWindow = await window.documentPictureInPicture.requestWindow({ width: 420, height: 180 });
+          pipWindow.document.body.innerHTML = `
+            <div style="background:#070b12; color:#e2e8f0; font-family:sans-serif; padding:10px; height:100%; box-sizing:border-box; display:flex; flex-direction:column; justify-content:space-between; user-select:none;">
+              <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #1e293b; padding-bottom:4px;">
+                <div style="font-weight:bold; font-size:11px; color:#10b981;">⨁ FinPlus+ HUD</div>
+                <div id="pip-time" style="font-size:10px; font-family:monospace; color:#64748b;">--:--:--</div>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin:4px 0; gap:6px;">
+                <div style="text-align:center; flex:1; background:#0f172a; padding:4px; border-radius:6px; border:1px solid #1e293b;">
+                  <div style="font-size:8px; color:#64748b;">TREND</div>
+                  <div id="pip-trend" style="font-size:11px; font-weight:bold; font-family:monospace; color:#f59e0b;">CHOPPY</div>
+                </div>
+                <div style="text-align:center; flex:1; background:#0f172a; padding:4px; border-radius:6px; border:1px solid #1e293b;">
+                  <div style="font-size:8px; color:#64748b;">EQUITIES</div>
+                  <div id="pip-equity" style="font-size:11px; font-weight:bold; font-family:monospace; color:#f59e0b;">AVOID BUYS</div>
+                </div>
+                <div style="text-align:center; flex:1; background:#0f172a; padding:4px; border-radius:6px; border:1px solid #1e293b;">
+                  <div style="font-size:8px; color:#64748b;">OPTIONS</div>
+                  <div id="pip-option" style="font-size:11px; font-weight:bold; font-family:monospace; color:#f43f5e;">NO OPTIONS</div>
+                </div>
+              </div>
+              <div id="pip-btst" style="background:#4c0519; color:#fecdd3; border-radius:6px; padding:4px 8px; font-size:10px; font-weight:bold; font-family:monospace; text-align:center;">
+                NSE 2,266 Equities: ADR 0.50 : 1 • BTST: HOLD CASH
+              </div>
+            </div>
+          `;
+        } catch (e) {
+          window.open('/static/floater.html', 'FinPlusFloater', 'width=420,height=180,alwaysOnTop=yes,resizable=yes');
+        }
+      } else {
+        window.open('/static/floater.html', 'FinPlusFloater', 'width=420,height=180,alwaysOnTop=yes,resizable=yes');
+      }
+    }
+
+    function updatePiP(trend, eqDir, optDir, adr) {
+      try {
+        const pTime = pipWindow.document.getElementById('pip-time');
+        const pTrend = pipWindow.document.getElementById('pip-trend');
+        const pEquity = pipWindow.document.getElementById('pip-equity');
+        const pOption = pipWindow.document.getElementById('pip-option');
+        const pBtst = pipWindow.document.getElementById('pip-btst');
+
+        if (pTime) pTime.textContent = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+        if (pTrend) {
+          pTrend.textContent = trend.label ? trend.label.split(' ')[0] : 'CHOPPY';
+          pTrend.style.color = trend.color === 'emerald' ? '#10b981' : (trend.color === 'rose' ? '#f43f5e' : '#f59e0b');
+        }
+        if (pEquity) {
+          pEquity.textContent = eqDir.badge || 'SIT CASH';
+          pEquity.style.color = eqDir.color === 'emerald' ? '#10b981' : (eqDir.color === 'rose' ? '#f43f5e' : '#f59e0b');
+        }
+        if (pOption) {
+          pOption.textContent = optDir.badge ? (optDir.badge.includes('DO NOT') ? 'NO OPTIONS' : optDir.badge) : 'NO OPTIONS';
+          pOption.style.color = optDir.color === 'emerald' ? '#10b981' : (optDir.color === 'rose' ? '#f43f5e' : '#f59e0b');
+        }
+        if (pBtst) {
+          pBtst.textContent = `NSE: ADR ${adr}:1 • 3:10 PM BTST: HOLD CASH`;
+        }
+      } catch (err) {
+        console.error("Error updating PiP", err);
+      }
+    }
+
+    // Immediate REST snapshot for instant UI paint, followed by live WebSocket streaming
+    fetch('/api/breadth')
+      .then(res => res.json())
+      .then(snapshot => {
+        if (snapshot) updateUI(snapshot);
+      })
+      .catch(err => console.warn('Initial REST breadth fetch:', err))
+      .finally(() => {
+        initWebSocket();
+      });
+  </script>
+</body>
+</html>

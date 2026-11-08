@@ -1,0 +1,10 @@
+# Git Ignore for FinPlus+ Index Breadth
+.env
+*.env
+config/.env
+logs/
+*.log
+__pycache__/
+*.pyc
+.pytest_cache/
+

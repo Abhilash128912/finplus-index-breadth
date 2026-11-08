@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>FinPlus+ Intraday Trend Floater</title>
+  <style>
+    body {
+      background: #070b12;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+      margin: 0;
+      padding: 10px;
+      user-select: none;
+      box-sizing: border-box;
+    }
+    .hud {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #1e293b;
+      padding-bottom: 4px;
+      font-size: 11px;
+    }
+    .brand { color: #10b981; font-weight: bold; }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 5px;
+      margin: 3px 0;
+    }
+    .card-item {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      padding: 4px;
+      border-radius: 6px;
+      text-align: center;
+    }
+    .card-label { font-size: 8px; color: #64748b; font-weight: bold; text-transform: uppercase; }
+    .card-val { font-size: 11px; font-weight: 800; font-family: monospace; margin-top: 2px; }
+    .footer-pill {
+      background: #4c0519;
+      color: #fecdd3;
+      border: 1px solid #e11d48;
+      text-align: center;
+      padding: 4px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: bold;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="hud">
+    <div class="header">
+      <div class="brand">⨁ FinPlus+ Intraday HUD</div>
+      <div id="clock" style="color:#94a3b8; font-family: monospace;">--:--:--</div>
+    </div>
+    
+    <div class="grid-3">
+      <div class="card-item">
+        <div class="card-label">TREND</div>
+        <div id="trend-val" class="card-val" style="color:#f59e0b;">CHOPPY</div>
+      </div>
+      <div class="card-item">
+        <div class="card-label">EQUITIES</div>
+        <div id="equity-val" class="card-val" style="color:#f59e0b;">AVOID BUYS</div>
+      </div>
+      <div class="card-item">
+        <div class="card-label">OPTIONS</div>
+        <div id="option-val" class="card-val" style="color:#f43f5e;">NO OPTIONS</div>
+      </div>
+    </div>
+
+    <div id="footer-banner" class="footer-pill">
+      NSE 2,266 Stocks (ADR 0.50 : 1) • 3:10 PM BTST: HOLD CASH
+    </div>
+  </div>
+
+  <script>
+    async function update() {
+      try {
+        const res = await fetch('/api/breadth');
+        const data = await res.json();
+        const regime = data.market_regime || {};
+        const trend = regime.trend || {};
+        const eqDir = regime.equities_directive || {};
+        const optDir = regime.options_directive || {};
+        const bm = data.broad_market && data.broad_market.broad_market ? data.broad_market.broad_market : {};
+
+        document.getElementById('clock').textContent = new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+
+        const trendEl = document.getElementById('trend-val');
+        trendEl.textContent = trend.label ? trend.label.split(' ')[0] : 'CHOPPY';
+        trendEl.style.color = trend.color === 'emerald' ? '#10b981' : (trend.color === 'rose' ? '#f43f5e' : '#f59e0b');
+
+        const eqEl = document.getElementById('equity-val');
+        eqEl.textContent = eqDir.badge || 'SIT CASH';
+        eqEl.style.color = eqDir.color === 'emerald' ? '#10b981' : (eqDir.color === 'rose' ? '#f43f5e' : '#f59e0b');
+
+        const optEl = document.getElementById('option-val');
+        optEl.textContent = optDir.badge ? (optDir.badge.includes('DO NOT') ? 'NO OPTIONS' : optDir.badge) : 'NO OPTIONS';
+        optEl.style.color = optDir.color === 'emerald' ? '#10b981' : (optDir.color === 'rose' ? '#f43f5e' : '#f59e0b');
+
+        const adr = bm.advance_decline_ratio || 0.50;
+        const banner = document.getElementById('footer-banner');
+        if (trend.color === 'emerald') {
+          banner.style.background = '#064e3b';
+          banner.style.color = '#a7f3d0';
+          banner.style.borderColor = '#059669';
+          banner.textContent = `NSE: ADR ${adr}:1 (BULLISH) • BTST: WATCH CALLS`;
+        } else if (trend.color === 'rose') {
+          banner.style.background = '#4c0519';
+          banner.style.color = '#fecdd3';
+          banner.style.borderColor = '#e11d48';
+          banner.textContent = `NSE: ADR ${adr}:1 (BEARISH) • BTST: HOLD CASH`;
+        } else {
+          banner.style.background = '#451a03';
+          banner.style.color = '#fde68a';
+          banner.style.borderColor = '#d97706';
+          banner.textContent = `NSE: ADR ${adr}:1 (DIVERGENT) • BTST: HOLD CASH`;
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    update();
+    setInterval(update, 3000);
+  </script>
+</body>
+</html>

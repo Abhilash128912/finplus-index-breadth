@@ -1,0 +1,252 @@
+{
+  "HDFCBANK": {
+    "security_id": "1333",
+    "weight": 11.45,
+    "scrip_code": "NSE_1333"
+  },
+  "RELIANCE": {
+    "security_id": "2885",
+    "weight": 9.18,
+    "scrip_code": "NSE_2885"
+  },
+  "ICICIBANK": {
+    "security_id": "4963",
+    "weight": 7.82,
+    "scrip_code": "NSE_4963"
+  },
+  "INFY": {
+    "security_id": "1594",
+    "weight": 5.48,
+    "scrip_code": "NSE_1594"
+  },
+  "ITC": {
+    "security_id": "1660",
+    "weight": 4.12,
+    "scrip_code": "NSE_1660"
+  },
+  "TCS": {
+    "security_id": "11536",
+    "weight": 3.95,
+    "scrip_code": "NSE_11536"
+  },
+  "LT": {
+    "security_id": "11483",
+    "weight": 3.86,
+    "scrip_code": "NSE_11483"
+  },
+  "BHARTIARTL": {
+    "security_id": "10604",
+    "weight": 3.74,
+    "scrip_code": "NSE_10604"
+  },
+  "AXISBANK": {
+    "security_id": "5900",
+    "weight": 3.32,
+    "scrip_code": "NSE_5900"
+  },
+  "KOTAKBANK": {
+    "security_id": "1922",
+    "weight": 2.85,
+    "scrip_code": "NSE_1922"
+  },
+  "SBIN": {
+    "security_id": "3045",
+    "weight": 2.78,
+    "scrip_code": "NSE_3045"
+  },
+  "M&M": {
+    "security_id": "2031",
+    "weight": 2.54,
+    "scrip_code": "NSE_2031"
+  },
+  "BAJFINANCE": {
+    "security_id": "317",
+    "weight": 2.15,
+    "scrip_code": "NSE_317"
+  },
+  "MARUTI": {
+    "security_id": "10999",
+    "weight": 1.88,
+    "scrip_code": "NSE_10999"
+  },
+  "HCLTECH": {
+    "security_id": "7229",
+    "weight": 1.76,
+    "scrip_code": "NSE_7229"
+  },
+  "SUNPHARMA": {
+    "security_id": "3351",
+    "weight": 1.68,
+    "scrip_code": "NSE_3351"
+  },
+  "TITAN": {
+    "security_id": "3506",
+    "weight": 1.62,
+    "scrip_code": "NSE_3506"
+  },
+  "TATAMOTORS": {
+    "security_id": "3456",
+    "weight": 1.58,
+    "scrip_code": "NSE_3456"
+  },
+  "ASIANPAINT": {
+    "security_id": "236",
+    "weight": 1.45,
+    "scrip_code": "NSE_236"
+  },
+  "NTPC": {
+    "security_id": "11630",
+    "weight": 1.42,
+    "scrip_code": "NSE_11630"
+  },
+  "POWERGRID": {
+    "security_id": "14977",
+    "weight": 1.38,
+    "scrip_code": "NSE_14977"
+  },
+  "TATASTEEL": {
+    "security_id": "3499",
+    "weight": 1.32,
+    "scrip_code": "NSE_3499"
+  },
+  "ULTRACEMCO": {
+    "security_id": "11532",
+    "weight": 1.25,
+    "scrip_code": "NSE_11532"
+  },
+  "BAJAJFINSV": {
+    "security_id": "16675",
+    "weight": 1.18,
+    "scrip_code": "NSE_16675"
+  },
+  "COALINDIA": {
+    "security_id": "20374",
+    "weight": 1.05,
+    "scrip_code": "NSE_20374"
+  },
+  "ONGC": {
+    "security_id": "2475",
+    "weight": 1.02,
+    "scrip_code": "NSE_2475"
+  },
+  "JSWSTEEL": {
+    "security_id": "11723",
+    "weight": 0.98,
+    "scrip_code": "NSE_11723"
+  },
+  "NESTLEIND": {
+    "security_id": "17963",
+    "weight": 0.95,
+    "scrip_code": "NSE_17963"
+  },
+  "GRASIM": {
+    "security_id": "1232",
+    "weight": 0.92,
+    "scrip_code": "NSE_1232"
+  },
+  "TECHM": {
+    "security_id": "13538",
+    "weight": 0.89,
+    "scrip_code": "NSE_13538"
+  },
+  "ADANIENT": {
+    "security_id": "25",
+    "weight": 0.88,
+    "scrip_code": "NSE_25"
+  },
+  "HINDUNILVR": {
+    "security_id": "1394",
+    "weight": 0.86,
+    "scrip_code": "NSE_1394"
+  },
+  "WIPRO": {
+    "security_id": "3787",
+    "weight": 0.82,
+    "scrip_code": "NSE_3787"
+  },
+  "ADANIPORTS": {
+    "security_id": "15083",
+    "weight": 0.8,
+    "scrip_code": "NSE_15083"
+  },
+  "HINDALCO": {
+    "security_id": "1363",
+    "weight": 0.78,
+    "scrip_code": "NSE_1363"
+  },
+  "CIPLA": {
+    "security_id": "694",
+    "weight": 0.75,
+    "scrip_code": "NSE_694"
+  },
+  "DIVISLAB": {
+    "security_id": "10940",
+    "weight": 0.72,
+    "scrip_code": "NSE_10940"
+  },
+  "APOLLOHOSP": {
+    "security_id": "157",
+    "weight": 0.7,
+    "scrip_code": "NSE_157"
+  },
+  "BPCL": {
+    "security_id": "526",
+    "weight": 0.68,
+    "scrip_code": "NSE_526"
+  },
+  "DRREDDY": {
+    "security_id": "881",
+    "weight": 0.65,
+    "scrip_code": "NSE_881"
+  },
+  "EICHERMOT": {
+    "security_id": "910",
+    "weight": 0.62,
+    "scrip_code": "NSE_910"
+  },
+  "BRITANNIA": {
+    "security_id": "547",
+    "weight": 0.6,
+    "scrip_code": "NSE_547"
+  },
+  "TATACONSUM": {
+    "security_id": "3432",
+    "weight": 0.58,
+    "scrip_code": "NSE_3432"
+  },
+  "BAJAJ-AUTO": {
+    "security_id": "16669",
+    "weight": 0.55,
+    "scrip_code": "NSE_16669"
+  },
+  "HEROMOTOCO": {
+    "security_id": "1348",
+    "weight": 0.52,
+    "scrip_code": "NSE_1348"
+  },
+  "SHRIRAMFIN": {
+    "security_id": "4306",
+    "weight": 0.5,
+    "scrip_code": "NSE_4306"
+  },
+  "TRENT": {
+    "security_id": "1964",
+    "weight": 0.48,
+    "scrip_code": "NSE_1964"
+  },
+  "BEL": {
+    "security_id": "383",
+    "weight": 0.46,
+    "scrip_code": "NSE_383"
+  },
+  "INDUSINDBK": {
+    "security_id": "5258",
+    "weight": 0.44,
+    "scrip_code": "NSE_5258"
+  },
+  "SBILIFE": {
+    "security_id": "21808",
+    "weight": 0.42,
+    "scrip_code": "NSE_21808"
+  }
+}
