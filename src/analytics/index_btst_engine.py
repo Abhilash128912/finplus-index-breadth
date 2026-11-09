@@ -118,7 +118,7 @@ class IndexBTSTEngine:
 
         sensex_wabi = sensex_breadth.get("wabi_score", 0.0)
 
-        nifty_spot = broad_market.get("nifty_spot", 25030.35) if broad_market else 25030.35
+        nifty_spot = float(broad_market.get("nifty_spot", 24925.0)) if broad_market else 24925.0
         sensex_spot = 79450.0
 
         passed_gates: List[str] = []

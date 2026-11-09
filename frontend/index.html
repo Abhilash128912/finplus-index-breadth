@@ -357,7 +357,7 @@
             <span class="text-xs text-slate-400 mono">points spread</span>
           </div>
           <div class="text-[11px] text-slate-400 mt-2" id="futures-basis-desc">
-            Futures: <b class="text-white mono" id="fut-price-ref">25,008</b> vs Spot: <b class="text-white mono" id="fut-spot-ref">25,030.35</b>
+            Futures: <b class="text-white mono" id="fut-price-ref">--</b> vs Spot: <b class="text-white mono" id="nifty-spot-ref">--</b>
           </div>
         </div>
       </div>
@@ -375,14 +375,14 @@
         <div>
           <div class="flex items-center gap-2">
             <span class="text-lg font-bold text-white">NIFTY 50 CONSTITUENTS</span>
-            <span id="nifty-regime-badge" class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-amber-950 border border-amber-500/40 text-amber-300">
-              BLUECHIP RALLY ONLY
+            <span id="nifty-regime-badge" class="text-xs px-2 py-0.5 rounded font-mono font-bold bg-slate-800 text-slate-300">
+              EVALUATING...
             </span>
           </div>
-          <div class="text-xs text-slate-400 mt-0.5">Spot: <b id="nifty-spot-val" class="text-white mono">25,030.35</b> (<span id="nifty-change-val" class="text-emerald-400 font-bold">+2.01%</span>)</div>
+          <div class="text-xs text-slate-400 mt-0.5">Spot: <b id="nifty-spot-val" class="text-white mono">--</b> (<span id="nifty-change-val" class="text-slate-400 font-bold">--</span>)</div>
         </div>
         <div class="text-right">
-          <div id="nifty-wabi-val" class="text-2xl font-black mono text-emerald-400">+0.84</div>
+          <div id="nifty-wabi-val" class="text-2xl font-black mono text-slate-400">--</div>
           <div class="text-[10px] text-slate-400">WABI Score (-1 to +1)</div>
         </div>
       </div>
@@ -390,18 +390,18 @@
       <div class="grid grid-cols-3 gap-3 my-5 text-center">
         <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
           <div class="text-[11px] text-slate-400">Stocks &gt; Day VWAP</div>
-          <div id="nifty-breadth-pct" class="text-xl font-black mono text-emerald-400 mt-0.5">90.0%</div>
-          <div class="text-[10px] text-slate-500">45 / 50 Stocks</div>
+          <div id="nifty-breadth-pct" class="text-xl font-black mono text-slate-200 mt-0.5">--%</div>
+          <div class="text-[10px] text-slate-500" id="nifty-above-count">-- / 50 Stocks</div>
         </div>
         <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
           <div class="text-[11px] text-slate-400">Up-Volume Thrust</div>
-          <div id="nifty-thrust-pct" class="text-xl font-black mono text-emerald-400 mt-0.5">88.2%</div>
-          <div class="text-[10px] text-slate-500">Bluechip Inflow</div>
+          <div id="nifty-thrust-pct" class="text-xl font-black mono text-slate-200 mt-0.5">--%</div>
+          <div class="text-[10px] text-slate-500" id="nifty-thrust-sub">Volume Bias</div>
         </div>
         <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
           <div class="text-[11px] text-slate-400">Constituents A/D</div>
-          <div id="nifty-const-ad" class="text-xl font-black mono text-white mt-0.5">46 / 4</div>
-          <div class="text-[10px] text-slate-500">11.5 : 1 Ratio</div>
+          <div id="nifty-const-ad" class="text-xl font-black mono text-white mt-0.5">-- / --</div>
+          <div class="text-[10px] text-slate-500" id="nifty-ad-ratio">-- : 1 Ratio</div>
         </div>
       </div>
 
@@ -411,7 +411,7 @@
           <div class="text-xs font-semibold text-slate-300 uppercase tracking-wider">
             Top 5 Heavyweights (~38% Index Control)
           </div>
-          <span class="text-xs mono font-bold text-emerald-400" id="hw-ratio-badge">5/5 Above VWAP</span>
+          <span class="text-xs mono font-bold text-slate-400" id="hw-ratio-badge">-- Above VWAP</span>
         </div>
         <div class="grid grid-cols-5 gap-2 text-xs mono text-center" id="hw-pills-box">
           <!-- Dynamically populated -->
@@ -429,10 +429,10 @@
               30 BLUECHIPS
             </span>
           </div>
-          <div class="text-xs text-slate-400 mt-0.5">Spot: <b id="sensex-spot-val" class="text-white mono">79,450.00</b> (<span id="sensex-change-val" class="text-emerald-400 font-bold">+1.85%</span>)</div>
+          <div class="text-xs text-slate-400 mt-0.5">Spot: <b id="sensex-spot-val" class="text-white mono">--</b> (<span id="sensex-change-val" class="text-slate-400 font-bold">--</span>)</div>
         </div>
         <div class="text-right">
-          <div id="sensex-wabi-val" class="text-2xl font-black mono text-emerald-400">+0.82</div>
+          <div id="sensex-wabi-val" class="text-2xl font-black mono text-slate-400">--</div>
           <div class="text-[10px] text-slate-400">WABI Score</div>
         </div>
       </div>
@@ -440,23 +440,23 @@
       <div class="grid grid-cols-3 gap-3 my-5 text-center">
         <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
           <div class="text-[11px] text-slate-400">Stocks &gt; Day VWAP</div>
-          <div id="sensex-breadth-val" class="text-xl font-black mono text-emerald-400 mt-0.5">86.7%</div>
-          <div class="text-[10px] text-slate-500">26 / 30 Stocks</div>
+          <div id="sensex-breadth-val" class="text-xl font-black mono text-slate-200 mt-0.5">--%</div>
+          <div class="text-[10px] text-slate-500" id="sensex-above-count">-- / 30 Stocks</div>
         </div>
         <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
           <div class="text-[11px] text-slate-400">Advances / Declines</div>
-          <div id="sensex-ad-val" class="text-xl font-black mono text-white mt-0.5">26 / 4</div>
-          <div class="text-[10px] text-slate-500">6.5 : 1 Ratio</div>
+          <div id="sensex-ad-val" class="text-xl font-black mono text-white mt-0.5">-- / --</div>
+          <div class="text-[10px] text-slate-500" id="sensex-ad-ratio">-- : 1 Ratio</div>
         </div>
         <div class="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
           <div class="text-[11px] text-slate-400">Constituent Bias</div>
-          <div class="text-xl font-black mono text-emerald-400 mt-0.5">ACCUMULATION</div>
+          <div class="text-xl font-black mono text-slate-200 mt-0.5" id="sensex-bias-text">--</div>
           <div class="text-[10px] text-slate-500">Bluechip Bias</div>
         </div>
       </div>
 
-      <div class="pt-4 border-t border-slate-800/80 text-xs text-slate-400 leading-relaxed">
-        ℹ️ <b>Divergence Warning:</b> While both Nifty 50 and Sensex 30 bluechips are trading above Day VWAP, the wider 2,266 NSE equity market has 1,343 declining stocks. This institutional divergence indicates institutions are hedging with index futures while distributing cash equity holdings.
+      <div class="pt-4 border-t border-slate-800/80 text-xs text-slate-400 leading-relaxed" id="divergence-warning-box">
+        <!-- Dynamically populated -->
       </div>
     </div>
 
@@ -864,15 +864,54 @@
       // 3. NIFTY 50 & SENSEX 30
       // -----------------------------------------------------------------
       const nifty = data.nifty || {};
-      const wabi = nifty.wabi_score || 0.837;
-      document.getElementById('nifty-wabi-val').textContent = (wabi >= 0 ? '+' : '') + wabi.toFixed(2);
-      document.getElementById('nifty-breadth-pct').textContent = (nifty.stocks_above_vwap_pct || 90.0).toFixed(1) + '%';
-      document.getElementById('nifty-thrust-pct').textContent = (nifty.volume_thrust_pct || 88.2).toFixed(1) + '%';
-      document.getElementById('nifty-const-ad').textContent = `${nifty.advances || 46} / ${nifty.declines || 4}`;
+      const wabi = nifty.wabi_score !== undefined ? nifty.wabi_score : 0.0;
+      const wabiEl = document.getElementById('nifty-wabi-val');
+      if (wabiEl) {
+        wabiEl.textContent = (wabi >= 0 ? '+' : '') + wabi.toFixed(2);
+        wabiEl.className = `text-2xl font-black mono ${wabi >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+      }
 
+      const nBrdPct = nifty.stocks_above_vwap_pct !== undefined ? nifty.stocks_above_vwap_pct : 0.0;
+      const nBrdEl = document.getElementById('nifty-breadth-pct');
+      if (nBrdEl) {
+        nBrdEl.textContent = nBrdPct.toFixed(1) + '%';
+        nBrdEl.className = `text-xl font-black mono mt-0.5 ${nBrdPct >= 50.0 ? 'text-emerald-400' : 'text-rose-400'}`;
+      }
+
+      const nAboveEl = document.getElementById('nifty-above-count');
+      if (nAboveEl) nAboveEl.textContent = `${nifty.stocks_above_vwap || 0} / ${nifty.total_constituents || 50} Stocks`;
+
+      const nThrustEl = document.getElementById('nifty-thrust-pct');
+      if (nThrustEl) {
+        const tPct = nifty.volume_thrust_pct !== undefined ? nifty.volume_thrust_pct : 50.0;
+        nThrustEl.textContent = tPct.toFixed(1) + '%';
+        nThrustEl.className = `text-xl font-black mono mt-0.5 ${tPct >= 50.0 ? 'text-emerald-400' : 'text-amber-400'}`;
+      }
+
+      const nConstAd = document.getElementById('nifty-const-ad');
+      if (nConstAd) nConstAd.textContent = `${nifty.advances !== undefined ? nifty.advances : '--'} / ${nifty.declines !== undefined ? nifty.declines : '--'}`;
+
+      const nAdRatioEl = document.getElementById('nifty-ad-ratio');
+      if (nAdRatioEl && nifty.advance_decline_ratio !== undefined) {
+        nAdRatioEl.textContent = `${nifty.advance_decline_ratio.toFixed(2)} : 1 Ratio`;
+      }
+
+      const nRegimeBadge = document.getElementById('nifty-regime-badge');
+      if (nRegimeBadge && nifty.regime) {
+        nRegimeBadge.textContent = nifty.regime.replace(/_/g, ' ');
+        nRegimeBadge.className = `text-xs px-2 py-0.5 rounded font-mono font-bold ${wabi >= 0 ? 'bg-emerald-950/80 border border-emerald-500/40 text-emerald-300' : 'bg-rose-950/80 border border-rose-500/40 text-rose-300'}`;
+      }
+
+      // Live Spot & Change
       if (data.broad_market && data.broad_market.nifty_spot) {
-        document.getElementById('nifty-spot-val').textContent = data.broad_market.nifty_spot.toLocaleString('en-IN');
-        document.getElementById('nifty-spot-ref').textContent = data.broad_market.nifty_spot.toLocaleString('en-IN');
+        const spotNum = Number(data.broad_market.nifty_spot);
+        const spotFormatted = spotNum.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        const nSpotVal = document.getElementById('nifty-spot-val');
+        if (nSpotVal) nSpotVal.textContent = spotFormatted;
+        const nSpotRef = document.getElementById('nifty-spot-ref');
+        if (nSpotRef) nSpotRef.textContent = spotFormatted;
+        const futSpotRef = document.getElementById('fut-spot-ref');
+        if (futSpotRef) futSpotRef.textContent = spotFormatted;
       }
       if (data.broad_market && data.broad_market.nifty_change_pct !== undefined) {
         const nChg = data.broad_market.nifty_change_pct;
@@ -885,35 +924,81 @@
 
       // Heavyweights
       const hwPills = document.getElementById('hw-pills-box');
-      hwPills.innerHTML = '';
-      const hwMap = nifty.heavyweights || { HDFCBANK: 'ABOVE_VWAP', RELIANCE: 'ABOVE_VWAP', ICICIBANK: 'ABOVE_VWAP', INFY: 'ABOVE_VWAP', ITC: 'ABOVE_VWAP' };
-      for (const [sym, status] of Object.entries(hwMap)) {
-        const isAbove = status === 'ABOVE_VWAP';
-        hwPills.innerHTML += `
-          <div class="p-2 rounded-lg border ${isAbove ? 'bg-emerald-950/40 border-emerald-600/40 text-emerald-300' : 'bg-rose-950/40 border-rose-600/40 text-rose-300'}">
-            <div class="font-bold text-[11px]">${sym}</div>
-            <div class="text-[9px] mt-0.5">${isAbove ? '▲ > VWAP' : '▼ < VWAP'}</div>
-          </div>
-        `;
+      if (hwPills) {
+        hwPills.innerHTML = '';
+        const hwMap = nifty.heavyweights || {};
+        for (const [sym, status] of Object.entries(hwMap)) {
+          const isAbove = status === 'ABOVE_VWAP';
+          hwPills.innerHTML += `
+            <div class="p-2 rounded-lg border ${isAbove ? 'bg-emerald-950/40 border-emerald-600/40 text-emerald-300' : 'bg-rose-950/40 border-rose-600/40 text-rose-300'}">
+              <div class="font-bold text-[11px]">${sym}</div>
+              <div class="text-[9px] mt-0.5">${isAbove ? '▲ > VWAP' : '▼ < VWAP'}</div>
+            </div>
+          `;
+        }
       }
-      document.getElementById('hw-ratio-badge').textContent = `${nifty.heavyweights_above_vwap_ratio || '5/5'} Above VWAP`;
+      const hwBadge = document.getElementById('hw-ratio-badge');
+      if (hwBadge) hwBadge.textContent = `${nifty.heavyweights_above_vwap_ratio || '--'} Above VWAP`;
 
+      // Sensex 30 Card
       const sensex = data.sensex || {};
-      document.getElementById('sensex-wabi-val').textContent = ((sensex.wabi_score || 0.82) >= 0 ? '+' : '') + (sensex.wabi_score || 0.82).toFixed(2);
-      document.getElementById('sensex-breadth-val').textContent = (sensex.stocks_above_vwap_pct || 86.7).toFixed(1) + '%';
-      document.getElementById('sensex-ad-val').textContent = `${sensex.advances || 26} / ${sensex.declines || 4}`;
+      const sWabi = sensex.wabi_score !== undefined ? sensex.wabi_score : 0.0;
+      const sWabiEl = document.getElementById('sensex-wabi-val');
+      if (sWabiEl) {
+        sWabiEl.textContent = (sWabi >= 0 ? '+' : '') + sWabi.toFixed(2);
+        sWabiEl.className = `text-2xl font-black mono ${sWabi >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+      }
+
+      const sBrdEl = document.getElementById('sensex-breadth-val');
+      if (sBrdEl) {
+        const sPct = sensex.stocks_above_vwap_pct !== undefined ? sensex.stocks_above_vwap_pct : 0.0;
+        sBrdEl.textContent = sPct.toFixed(1) + '%';
+        sBrdEl.className = `text-xl font-black mono mt-0.5 ${sPct >= 50.0 ? 'text-emerald-400' : 'text-rose-400'}`;
+      }
+
+      const sAboveCount = document.getElementById('sensex-above-count');
+      if (sAboveCount) sAboveCount.textContent = `${sensex.stocks_above_vwap || 0} / ${sensex.total_constituents || 30} Stocks`;
+
+      const sAdVal = document.getElementById('sensex-ad-val');
+      if (sAdVal) sAdVal.textContent = `${sensex.advances !== undefined ? sensex.advances : '--'} / ${sensex.declines !== undefined ? sensex.declines : '--'}`;
+
+      const sAdRatio = document.getElementById('sensex-ad-ratio');
+      if (sAdRatio && sensex.advance_decline_ratio !== undefined) {
+        sAdRatio.textContent = `${sensex.advance_decline_ratio.toFixed(2)} : 1 Ratio`;
+      }
+
+      const sBiasText = document.getElementById('sensex-bias-text');
+      if (sBiasText && sensex.sentiment) {
+        sBiasText.textContent = sensex.sentiment;
+        sBiasText.className = `text-xl font-black mono mt-0.5 ${sWabi >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+      }
 
       const sSpotEl = document.getElementById('sensex-spot-val');
-      const sSpotRefEl = document.getElementById('sensex-spot-ref');
       const sChgEl = document.getElementById('sensex-change-val');
-      const sensexSpot = (data.broad_market && data.broad_market.sensex_spot) ? data.broad_market.sensex_spot : 79450.0;
-      const sensexChg = (data.broad_market && data.broad_market.sensex_change_pct) ? data.broad_market.sensex_change_pct : 1.85;
+      if (data.broad_market) {
+        const sLtp = data.broad_market.sensex_spot || 79450.0;
+        const sChg = data.broad_market.sensex_change_pct !== undefined ? data.broad_market.sensex_change_pct : 0.0;
+        if (sSpotEl) sSpotEl.textContent = Number(sLtp).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        if (sChgEl) {
+          sChgEl.textContent = (sChg >= 0 ? '+' : '') + Number(sChg).toFixed(2) + '%';
+          sChgEl.className = sChg >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold';
+        }
+      }
 
-      if (sSpotEl) sSpotEl.textContent = sensexSpot.toLocaleString('en-IN');
-      if (sSpotRefEl) sSpotRefEl.textContent = sensexSpot.toLocaleString('en-IN');
-      if (sChgEl) {
-        sChgEl.textContent = (sensexChg >= 0 ? '+' : '') + sensexChg.toFixed(2) + '%';
-        sChgEl.className = sensexChg >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold';
+      // Dynamic Divergence Analysis Box
+      const divBox = document.getElementById('divergence-warning-box');
+      if (divBox) {
+        const bm = data.broad_market?.broad_market || {};
+        const bAdv = bm.advances || 0;
+        const bDec = bm.declines || 0;
+        const bAdr = bm.advance_decline_ratio || 1.0;
+        if (regime.trend?.is_divergence) {
+          divBox.innerHTML = `⚠️ <b class="text-amber-300">Divergence Warning:</b> Bluechips are propped up, but across the wider exchange <b>${bDec}</b> stocks are declining vs <b>${bAdv}</b> advancing (ADR: ${bAdr}:1). High risk of bull trap.`;
+        } else if (regime.trend?.code?.includes("DOWNTREND")) {
+          divBox.innerHTML = `📉 <b class="text-rose-400">Trend Alignment:</b> Broad market and benchmark constituents are aligned in distribution. Declines (${bDec}) dominate advances (${bAdv}). Honor defensive stops.`;
+        } else {
+          divBox.innerHTML = `ℹ️ <b>Market Synchronicity:</b> Advances: <b>${bAdv}</b> | Declines: <b>${bDec}</b> (ADR: <b>${bAdr}:1</b>). Market breadth confirms current regime.`;
+        }
       }
 
       // -----------------------------------------------------------------

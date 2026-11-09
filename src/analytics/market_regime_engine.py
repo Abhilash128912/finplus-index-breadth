@@ -51,7 +51,7 @@ class MarketRegimeEngine:
         nifty_thrust = nifty_breadth.get("volume_thrust_pct", 50.0)
         nifty_hw = nifty_breadth.get("heavyweights", {})
         nifty_hw_above = sum(1 for v in nifty_hw.values() if v == "ABOVE_VWAP")
-        nifty_spot = broad_market.get("nifty_spot", 25030.35) if broad_market else 25030.35
+        nifty_spot = float(broad_market.get("nifty_spot", 24925.0)) if broad_market else 24925.0
         nifty_chg = broad_market.get("nifty_change_pct", 0.0) if broad_market else 0.0
 
         # Extract Broad Market metrics (All 2,266 NSE Stocks)

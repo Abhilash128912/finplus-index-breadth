@@ -49,6 +49,7 @@ class INDMoneyMarketFeed:
         self.sensex_map = self._load_json(self.config_dir / "sensex30_scrip_map.json")
         self._quote_cache: Dict[str, Dict[str, Any]] = {}
         self._cache_timestamp: float = 0.0
+        self._broker_cooldown_until: float = 0.0
 
     def _load_json(self, path: Path) -> Dict[str, Any]:
         """Safely loads a JSON configuration mapping."""
@@ -59,65 +60,42 @@ class INDMoneyMarketFeed:
             return json.load(f)
 
     def _fetch_quote_chunk(self, scrip_codes: List[str]) -> Dict[str, Any]:
-        """Fetches a single chunk of scrip codes from INDstocks with automatic retry on 429."""
+        """Fetches a single chunk of scrip codes from INDstocks with cooldown on rate limit."""
         if not scrip_codes:
             return {}
-        headers = self.auth_client.get_auth_headers()
+
+        now = time.time()
+        if now < self._broker_cooldown_until:
+            return {}
+
+        try:
+            headers = self.auth_client.get_auth_headers()
+        except Exception as e:
+            logger.warning("Failed to obtain INDstocks auth headers (%s). Cooling down for 120s.", e)
+            self._broker_cooldown_until = now + 120.0
+            return {}
+
         joined = ",".join(scrip_codes)
         url = f"{self.BASE_URL}{self.QUOTES_ENDPOINT}?scrip-codes={joined}"
         
-        max_retries = 2
-        for attempt in range(max_retries + 1):
-            try:
-                resp = requests.get(url, headers=headers, timeout=8)
-                if resp.status_code == 200:
-                    payload = resp.json()
-                    return payload.get("data", {})
-                elif resp.status_code in (401, 403):
-                    logger.warning(
-                        "INDstocks token rejected (HTTP %s): %s. Triggering automatic headless TOTP authentication...",
-                        resp.status_code,
-                        resp.text[:120],
-                    )
-                    # Broker invalidated or revoked session: generate brand new token via TOTP
-                    try:
-                        self.auth_client.access_token = None
-                        new_token = self.auth_client.generate_fresh_token(persist_to_env=True)
-                        headers = {"x-api-key": self.auth_client.client_id, "access-token": new_token}
-                        # Immediate retry with fresh token
-                        retry_resp = requests.get(url, headers=headers, timeout=8)
-                        if retry_resp.status_code == 200:
-                            logger.info("Successfully authenticated via TOTP and fetched quotes!")
-                            return retry_resp.json().get("data", {})
-                        else:
-                            logger.error("TOTP retry quote fetch returned HTTP %s: %s", retry_resp.status_code, retry_resp.text[:120])
-                            return {}
-                    except Exception as e:
-                        logger.error("Automated TOTP re-authentication failed: %s", e)
-                        return {}
-                elif resp.status_code == 429:
-                    if attempt < max_retries:
-                        backoff = 0.6 * (attempt + 1)
-                        logger.warning(
-                            "Batch quotes chunk hit HTTP 429 rate limit. Retrying in %.1fs (attempt %d/%d)...",
-                            backoff,
-                            attempt + 1,
-                            max_retries,
-                        )
-                        time.sleep(backoff)
-                        continue
-                    else:
-                        logger.warning("Batch quotes chunk returned HTTP 429: %s", resp.text[:120])
-                        return {}
-                else:
-                    logger.warning("Batch quotes chunk returned HTTP %s: %s", resp.status_code, resp.text[:120])
-                    return {}
-            except Exception as exc:
-                if attempt < max_retries:
-                    time.sleep(0.5)
-                    continue
-                logger.error("Failed to fetch quote chunk: %s", exc)
+        try:
+            resp = requests.get(url, headers=headers, timeout=3.0)
+            if resp.status_code == 200:
+                payload = resp.json()
+                return payload.get("data", {})
+            elif resp.status_code in (401, 403, 429):
+                logger.warning(
+                    "INDstocks quote returned HTTP %s. Setting 120s cooldown.",
+                    resp.status_code
+                )
+                self._broker_cooldown_until = now + 120.0
                 return {}
+            else:
+                logger.warning("Batch quotes chunk returned HTTP %s: %s", resp.status_code, resp.text[:120])
+                return {}
+        except Exception as exc:
+            logger.error("Failed to fetch quote chunk: %s", exc)
+            return {}
         return {}
 
     def fetch_index_quotes(self, index_name: str = "NIFTY") -> List[Dict[str, Any]]:

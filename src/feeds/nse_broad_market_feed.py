@@ -134,13 +134,6 @@ class NSEBroadMarketFeed:
         except Exception as exc:
             logger.warning("Failed to fetch NSE Nifty futures: %s", exc)
 
-        # Extract full exchange metrics
-        full_adv = int(raw_all_stocks.get("advances", 674))
-        full_dec = int(raw_all_stocks.get("declines", 1343))
-        full_unc = int(raw_all_stocks.get("unchanged", 249))
-        full_total = full_adv + full_dec + full_unc if (full_adv + full_dec + full_unc) > 0 else 2266
-        full_adr = round(full_adv / max(full_dec, 1), 2)
-
         # Index lookup map
         idx_map = {x.get("index"): x for x in raw_indices}
         nifty_500 = idx_map.get("NIFTY 500", {})
@@ -148,6 +141,37 @@ class NSEBroadMarketFeed:
         nifty_mid = idx_map.get("NIFTY MIDCAP 150", {})
         nifty_small = idx_map.get("NIFTY SMALLCAP 250", {})
         india_vix_entry = idx_map.get("INDIA VIX", {})
+
+        # Extract full exchange metrics
+        # During live market hours, use the aggregated live advances/declines across active indices
+        is_market_live = market_state.get("marketStatus") == "Open"
+        n500_adv = int(nifty_500.get("advances") or 0)
+        n500_dec = int(nifty_500.get("declines") or 0)
+        n500_unc = int(nifty_500.get("unchanged") or 0)
+
+        mid_adv = int(nifty_mid.get("advances") or 0)
+        mid_dec = int(nifty_mid.get("declines") or 0)
+        mid_unc = int(nifty_mid.get("unchanged") or 0)
+
+        small_adv = int(nifty_small.get("advances") or 0)
+        small_dec = int(nifty_small.get("declines") or 0)
+        small_unc = int(nifty_small.get("unchanged") or 0)
+
+        live_broad_adv = n500_adv + mid_adv + small_adv
+        live_broad_dec = n500_dec + mid_dec + small_dec
+        live_broad_unc = n500_unc + mid_unc + small_unc
+
+        if is_market_live and (live_broad_adv + live_broad_dec) > 0:
+            full_adv = live_broad_adv
+            full_dec = live_broad_dec
+            full_unc = live_broad_unc
+        else:
+            full_adv = int(raw_all_stocks.get("advances", 674))
+            full_dec = int(raw_all_stocks.get("declines", 1343))
+            full_unc = int(raw_all_stocks.get("unchanged", 249))
+
+        full_total = full_adv + full_dec + full_unc if (full_adv + full_dec + full_unc) > 0 else 2266
+        full_adr = round(full_adv / max(full_dec, 1), 2)
 
         # Parse India VIX
         vix_val = float(india_vix_entry.get("last") or 15.50)
@@ -201,13 +225,23 @@ class NSEBroadMarketFeed:
         top_leader = sector_items[0] if sector_items else {}
         top_laggard = sector_items[-1] if sector_items else {}
 
+        # Parse accurate live Nifty spot price
+        live_spot = market_state.get("last") or nifty_50.get("last")
+        try:
+            parsed_spot = float(live_spot) if live_spot else 24925.0
+        except (ValueError, TypeError):
+            parsed_spot = 24925.0
+
+        live_change = market_state.get("variation") or nifty_50.get("variation") or 0.0
+        live_change_pct = market_state.get("percentChange") or nifty_50.get("percentChange") or 0.0
+
         return {
             "timestamp": datetime.datetime.now(tz=IST).isoformat(),
             "market_status": market_state.get("marketStatus", "Closed"),
             "trade_date": market_state.get("tradeDate", ""),
-            "nifty_spot": float(market_state.get("last", nifty_50.get("last", 25030.35))),
-            "nifty_change": float(market_state.get("variation", nifty_50.get("variation", 0.0))),
-            "nifty_change_pct": float(market_state.get("percentChange", nifty_50.get("percentChange", 0.0))),
+            "nifty_spot": parsed_spot,
+            "nifty_change": float(live_change),
+            "nifty_change_pct": float(live_change_pct),
             "sector_rotation": {
                 "leader": top_leader,
                 "laggard": top_laggard,
@@ -263,7 +297,7 @@ class NSEBroadMarketFeed:
                     "advances": int(nifty_50.get("advances") or 46),
                     "declines": int(nifty_50.get("declines") or 4),
                     "unchanged": int(nifty_50.get("unchanged") or 0),
-                    "ltp": float(nifty_50.get("last") or 25030.35),
+                    "ltp": float(nifty_50.get("last") or parsed_spot),
                 },
                 "nifty_midcap": {
                     "name": "NIFTY Midcap 150",
