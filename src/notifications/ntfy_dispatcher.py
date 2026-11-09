@@ -1,13 +1,11 @@
 """
-FinPlus+ NTFY Multi-Topic Notification Dispatcher
-=================================================
+FinPlus+ Multi-Topic NTFY Push Notification Dispatcher
+======================================================
 Module: finplus_index_breadth.notifications.ntfy_dispatcher
 Author: FinPlus+ Enterprise Infrastructure
-Standard: ISO-8601, Dual-Topic Broadcast, Exact ATM Options Contracts
+Standard: ISO-8601, Asynchronous Multi-Topic Broadcast, Clean Financial Bulletin (No Emojis)
 
-Broadcasts simultaneously to both:
-1. Finplus-Delta (User's primary phone topic)
-2. Finplus-Breadth (Dedicated breadth topic)
+Broadcasts high-priority alerts to ntfy.sh topics with normal font sizing.
 """
 
 from __future__ import annotations
@@ -24,7 +22,8 @@ from finplus_core.utils.logger import get_finplus_logger
 logger = get_finplus_logger("NTFYDispatcher")
 
 IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
-DEFAULT_TOPICS = ["Finplus-Delta", "Finplus-Breadth"]
+# App 1 broadcasts exclusively to Finplus-Breadth to prevent duplicating App 2's master alerts
+DEFAULT_TOPICS = ["Finplus-Breadth"]
 
 
 def _safe_header_title(title: str) -> str:
@@ -68,15 +67,13 @@ class NTFYDispatcher:
         click_url: Optional[str] = None,
         actions: Optional[str] = None,
     ) -> bool:
-        """Sends push notification to all registered topics with optional click actions."""
+        """Sends push notification to registered topics with standard normal font size."""
         headers = {
             "Title": _safe_header_title(title),
             "Priority": str(priority),
-            "Markdown": "yes",
-            "X-Markdown": "yes",
+            "Markdown": "no",
+            "X-Markdown": "no",
         }
-        if tags:
-            headers["Tags"] = ",".join(tags)
         if click_url:
             headers["Click"] = click_url
         if actions:
@@ -108,10 +105,7 @@ class NTFYDispatcher:
         regime_info: Dict[str, Any],
         breadth_snapshot: Dict[str, Any],
     ) -> bool:
-        """
-        Dispatches an IMMEDIATE high-priority push alert when the Market Regime transitions.
-        Triggers instantaneously (no 30-min delay) so traders can react to trend shifts immediately.
-        """
+        """Dispatches immediate notification when the Market Regime transitions."""
         now_str = datetime.datetime.now(tz=IST).strftime("%H:%M IST")
         trend = regime_info.get("trend", {})
         new_label = trend.get("label", "CHOPPY")
@@ -128,50 +122,27 @@ class NTFYDispatcher:
 
         vix_info = bm_root.get("vix", {})
         deriv_info = bm_root.get("derivatives", {})
-        sector_info = bm_root.get("sector_rotation", {})
-        leader = sector_info.get("leader", {})
 
-        title = f"🚨 TREND FLIP [{now_str}] | {new_label}"
+        title = f"FinPlus Breadth | Regime Flip | {now_str}"
 
         msg_lines = [
-            f"⚡ IMMEDIATE MARKET REGIME TRANSITION",
-            f"• Previous: {prev_label}",
-            f"• New State: {new_label} (CTI: {score_label})",
-            "",
-            f"💼 NEW EQUITIES DIRECTIVE:",
-            f"• {eq_dir.get('action', 'CAUTION')}",
-            "",
-            f"⚡ NEW OPTIONS DIRECTIVE:",
-            f"• {opt_dir.get('action', 'NO TRADE')}",
-            "",
-            f"📊 Key Drivers Behind Shift:",
-            f"• All-NSE ADR: {adr}:1 ({adv} Adv vs {dec} Dec)",
-            f"• India VIX: {vix_info.get('value', 15.5):.2f} ({vix_info.get('change_pct', 0.0):+.1f}%)",
-            f"• Index Options PCR: {deriv_info.get('index_options_pcr', 0.85):.2f}",
-            f"• Sector Leader: {leader.get('name', 'NIFTY')} ({leader.get('change_pct', 0.0):+.2f}%)",
-            "",
-            f"Tap notification to open live FinPlus Cockpit."
+            f"REGIME TRANSITION: {prev_label} -> {new_label} (CTI: {score_label})",
+            f"Equities: {eq_dir.get('action', 'CAUTION')}",
+            f"Options: {opt_dir.get('action', 'NO TRADE')}",
+            f"Drivers: ADR {adr}:1 ({adv} Adv / {dec} Dec) | VIX {vix_info.get('value', 15.5):.2f} | PCR {deriv_info.get('index_options_pcr', 0.85):.2f}",
+            f"Cockpit: https://finplus-index-breadth.onrender.com"
         ]
 
-        tag = "rotating_light" if "DIVERGENT" in new_label or "DOWNTREND" in new_label else "rocket"
         return self.send_notification(
             title=title,
             message="\n".join(msg_lines),
-            priority=5 if "STRONG" in new_label or "DIVERGENT" in new_label else 4,
-            tags=[tag, "bell", "warning"],
+            priority=4,
             click_url="https://finplus-index-breadth.onrender.com",
             actions="view, Open Cockpit, https://finplus-index-breadth.onrender.com",
         )
 
     def send_periodic_breadth_pulse(self, breadth_snapshot: Dict[str, Any]) -> bool:
-        """
-        Dispatches the 30-minute periodic market decision & breadth update.
-        Called at 09:30, 10:00, 10:30 ... 15:00 IST.
-        Answers:
-        1. Market Trend Regime (Uptrend/Choppy/Downtrend)
-        2. Should I buy or sell equities intraday?
-        3. Whether I need to buy options today or not?
-        """
+        """Dispatches clean periodic breadth update."""
         now_str = datetime.datetime.now(tz=IST).strftime("%H:%M IST")
         regime_info = breadth_snapshot.get("market_regime", {})
         trend = regime_info.get("trend", {})
@@ -188,114 +159,65 @@ class NTFYDispatcher:
 
         nifty_above = nifty.get("stocks_above_vwap_pct", 0.0)
         nifty_wabi = nifty.get("wabi_score", 0.0)
-        nifty_chg = nifty.get("avg_change_pct", 0.0)
+        nifty_chg = nifty.get("change_pct", 0.0)
+        nifty_spot = nifty.get("spot_price", 24850.0)
 
         total_adv = broad.get("advances", nifty.get("advances", 0))
         total_dec = broad.get("declines", nifty.get("declines", 0))
         adr = broad.get("advance_decline_ratio", nifty.get("advance_decline_ratio", 1.0))
-        turnover_cr = broad.get("total_market_turnover_crores", 0)
 
-        # Derivatives & Volatility
         bm_root = breadth_snapshot.get("broad_market", {})
         vix_info = bm_root.get("vix", {})
         deriv_info = bm_root.get("derivatives", {})
-        vix_val = vix_info.get("value", 15.5)
-        vix_chg = vix_info.get("change_pct", 0.0)
-        pcr_val = deriv_info.get("index_options_pcr", 0.85)
-        fut_basis = deriv_info.get("nifty_futures_basis", 0.0)
-        basis_type = deriv_info.get("futures_basis_type", "DISCOUNT")
 
-        title = f"FinPlus+ Trend [{now_str}] | {trend_label}"
+        title = f"FinPlus Breadth | {now_str}"
 
         msg_lines = [
-            f"🧭 MARKET TREND: {trend_label}",
-            "",
-            f"💼 EQUITIES DIRECTIVE:",
-            f"• {equity_action}",
-            f"• {eq_dir.get('guidance', '')}",
-            "",
-            f"⚡ OPTIONS DIRECTIVE:",
-            f"• {option_action}",
-            f"• {opt_dir.get('guidance', '')}",
-            "",
-            f"📈 DERIVATIVES & VOLATILITY PILLARS:",
-            f"• India VIX: {vix_val:.2f} ({vix_chg:+.1f}%) | {vix_info.get('label', 'Normal')}",
-            f"• Index Options PCR: {pcr_val:.2f} | {deriv_info.get('pcr_label', 'Equilibrium')}",
-            f"• Nifty Futures Basis: {fut_basis:+.1f} pts ({basis_type})",
-            "",
-            f"📊 ALL NSE STOCKS BREADTH (2,266 Equities):",
-            f"• Advances: {total_adv} | Declines: {total_dec} (ADR: {adr}:1)",
-            f"• Nifty 50 > VWAP: {nifty_above:.1f}% | WABI: {nifty_wabi:+.2f} ({nifty_chg:+.2f}%)",
-            f"• Top 5 Heavyweights: {nifty.get('heavyweights_above_vwap_ratio', '0/5')} Above VWAP",
-            "",
-            f"Next pulse in 30 mins | FinPlus+ Institutional Feed"
+            f"Spot: NIFTY {nifty_spot:,.0f} ({nifty_chg:+.2f}%) | Trend: {trend_label}",
+            f"Equities: {equity_action}",
+            f"Options: {option_action}",
+            f"ADR: {adr}:1 ({total_adv} Adv / {total_dec} Dec) | Nifty > VWAP: {nifty_above:.1f}% | WABI: {nifty_wabi:+.2f}",
+            f"Pillars: VIX {vix_info.get('value', 15.5):.2f} | PCR {deriv_info.get('index_options_pcr', 0.85):.2f}",
+            f"Cockpit: https://finplus-index-breadth.onrender.com"
         ]
 
-        tag = "chart_with_upwards_trend" if "UPTREND" in trend_label else ("chart_with_downwards_trend" if "DOWNTREND" in trend_label else "warning")
         return self.send_notification(
             title=title,
             message="\n".join(msg_lines),
             priority=3,
-            tags=[tag, "chart", "moneybag"],
+            click_url="https://finplus-index-breadth.onrender.com",
+            actions="view, Open Cockpit, https://finplus-index-breadth.onrender.com",
         )
 
-    def send_btst_recommendation(self, btst_data: Dict[str, Any]) -> bool:
-        """
-        Dispatches the afternoon 3:10 - 3:30 PM BTST index decision with EXACT ATM OPTIONS.
-        """
+    def send_btst_recommendation(self, btst_result: Dict[str, Any]) -> bool:
+        """Dispatches clean 3:15 PM IST BTST notification."""
         now_str = datetime.datetime.now(tz=IST).strftime("%H:%M IST")
-        status = btst_data.get("status")
-        instrument = btst_data.get("instrument", "NIFTY")
-        nifty_opt = btst_data.get("nifty_atm_contract", {})
-        sensex_opt = btst_data.get("sensex_atm_contract", {})
+        decision = btst_result.get("decision", "CASH_PROTECT_STANDBY")
+        title = f"FinPlus BTST | {now_str} | {decision}"
 
-        if status == "BTST_QUALIFIED":
-            title = f"FinPlus+ BTST ALERT [{now_str}] | {instrument} LONG"
+        if decision == "QUALIFIED_CALL_BUY":
+            nifty_opt = btst_result.get("nifty_option_recommendation", {})
+            sensex_opt = btst_result.get("sensex_option_recommendation", {})
             msg_lines = [
-                f"⚡ HIGH CONVICTION BTST QUALIFIED",
-                f"Execution Window: 3:20 PM - 3:28 PM IST",
-                "",
-                f"🎯 RECOMMENDED ATM CONTRACTS:",
-                f"1) NIFTY 50 ATM CALL:",
-                f"   • Contract: {nifty_opt.get('contract_symbol', 'NIFTY ATM CE')}",
-                f"   • Strike: {nifty_opt.get('atm_strike', 'ATM')} (Spot: {nifty_opt.get('spot_price')})",
-                f"   • Target: {nifty_opt.get('target_index_points', '+80 to +140 pts')}",
-                f"   • Stop Loss: {nifty_opt.get('stop_loss_invalidation', 'Sub-VWAP Cut')}",
-                "",
-                f"2) SENSEX 30 ATM CALL:",
-                f"   • Contract: {sensex_opt.get('contract_symbol', 'SENSEX ATM CE')}",
-                f"   • Strike: {sensex_opt.get('atm_strike', 'ATM')} (Spot: {sensex_opt.get('spot_price')})",
-                f"   • Target: {sensex_opt.get('target_index_points', '+250 to +420 pts')}",
-                "",
-                f"🛡️ Confirmation: WABI {btst_data.get('wabi', 'N/A')}, 4+ Heavyweights > VWAP",
-                f"SEBI: STBT prohibited in cash equity. Trade Long only or hold cash."
+                f"BTST: QUALIFIED CALL BUY OVERNIGHT",
+                f"Nifty ATM: {nifty_opt.get('contract_symbol')} (Strike {nifty_opt.get('atm_strike')})",
+                f"Sensex ATM: {sensex_opt.get('contract_symbol')} (Strike {sensex_opt.get('atm_strike')})",
+                f"Rules: Max Rs 5,000 risk, exit 09:15-09:30 AM tomorrow.",
+                f"Cockpit: https://finplus-index-breadth.onrender.com"
             ]
-            return self.send_notification(
-                title=title,
-                message="\n".join(msg_lines),
-                priority=5,
-                tags=["zap", "rocket", "moneybag"],
-            )
+            priority = 5
         else:
-            title = f"FinPlus+ BTST [{now_str}] | 🛑 100% CASH (NO TRADE)"
-            reasons = btst_data.get("reasons", ["Market breadth neutral or choppy"])
-            reasons_str = "\n".join([f"• {r}" for r in reasons])
-
             msg_lines = [
-                f"🛑 BTST DIRECTIVE: HOLD 100% CASH OVERNIGHT",
-                f"🚫 OVERNIGHT OPTIONS: STRICTLY BARRED (DO NOT BUY CALLS/PUTS)",
-                f"",
-                f"📋 Why Overnight Trade Is Disqualified:",
-                f"{reasons_str}",
-                f"",
-                f"💡 Capital Protection Rule:",
-                f"Carrying overnight calls in a choppy/divergent market has a >68% probability of severe gap-down reversal and overnight theta erosion. Zero overnight risk is taken.",
-                f"",
-                f"🔒 Action: Do NOT place any orders. Maintain 100% Cash balance overnight."
+                f"BTST: 100% CASH STANDBY (NO OVERNIGHT TRADES)",
+                f"Action: Maintain full cash balance overnight. Avoid holding naked options.",
+                f"Cockpit: https://finplus-index-breadth.onrender.com"
             ]
-            return self.send_notification(
-                title=title,
-                message="\n".join(msg_lines),
-                priority=4,
-                tags=["octagonal_sign", "shield", "no_entry"],
-            )
+            priority = 3
+
+        return self.send_notification(
+            title=title,
+            message="\n".join(msg_lines),
+            priority=priority,
+            click_url="https://finplus-index-breadth.onrender.com",
+            actions="view, Open Cockpit, https://finplus-index-breadth.onrender.com",
+        )
