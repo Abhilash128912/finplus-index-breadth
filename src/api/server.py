@@ -103,6 +103,12 @@ async def serve_index() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "index.html")
 
 
+@app.get("/cockpit")
+async def serve_cockpit() -> FileResponse:
+    """Serves the Master Multi-Pane Cockpit HUD."""
+    return FileResponse(FRONTEND_DIR / "cockpit.html")
+
+
 @app.get("/api/status")
 async def get_health_status() -> Dict[str, Any]:
     """Health check endpoint and Render keep-alive ping."""
