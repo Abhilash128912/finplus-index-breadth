@@ -71,7 +71,7 @@
         </button>
       </div>
 
-      <a href="http://127.0.0.1:8001" target="_blank" class="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-2 rounded-xl shadow-lg transition active:scale-95" title="Open App #2 Stock & Options Scanner">
+      <a id="nav-scanner-link" href="http://127.0.0.1:8001" target="_blank" class="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-2 rounded-xl shadow-lg transition active:scale-95" title="Open App #2 Stock & Options Scanner">
         <span>🎯 Scanner Cockpit (:8001)</span>
       </a>
 
@@ -103,7 +103,7 @@
           <span class="text-xs text-slate-400 font-mono" id="trend-time">--:-- IST</span>
         </div>
         <div class="text-xs text-slate-400 font-mono">
-          Macro Drivers: <span id="trend-quick-summary" class="text-white font-bold">2,266 NSE Stocks ADR 0.50 : 1 • Nifty WABI +0.84</span>
+          Macro Drivers: <span id="trend-quick-summary" class="text-white font-bold">Connecting Live 2,266 NSE Equities...</span>
         </div>
       </div>
 
@@ -115,10 +115,10 @@
         <div id="regime-mod-up" class="p-2.5 rounded-xl border border-slate-800 bg-slate-900/60 text-slate-500 transition-all">
           ▲ UPTREND
         </div>
-        <div id="regime-choppy" class="p-2.5 rounded-xl border-2 border-amber-500 bg-amber-950/80 text-amber-300 regime-pill-active transition-all">
+        <div id="regime-choppy" class="p-2.5 rounded-xl border border-slate-800 bg-slate-900/60 text-slate-500 transition-all">
           ◆ CHOPPY / DIVERGENT
         </div>
-        <div id="regime-mod-down" class="p-2.5 rounded-xl border border-slate-800 bg-slate-900/60 text-slate-500 transition-all">
+        <div id="regime-mod-down" class="p-2.5 rounded-xl border-2 border-rose-500 bg-rose-950/80 text-rose-300 regime-pill-active transition-all">
           ▼ DOWNTREND
         </div>
         <div id="regime-strong-down" class="p-2.5 rounded-xl border border-slate-800 bg-slate-900/60 text-slate-500 transition-all">
@@ -128,11 +128,11 @@
 
       <!-- Dynamic Trend Headline & Description -->
       <div class="mt-2">
-        <h2 class="text-xl md:text-2xl font-black text-white tracking-tight flex items-center gap-2" id="trend-headline">
-          ⚠️ CHOPPY / DIVERGENT: NARROW BLUECHIP RALLY (BROAD MARKET WEAK)
+        <h2 class="text-xl md:text-2xl font-black text-rose-400 tracking-tight flex items-center gap-2" id="trend-headline">
+          DOWNTREND (BEAR DISTRIBUTION)
         </h2>
         <p class="text-xs text-slate-300 mt-1 max-w-5xl leading-relaxed" id="trend-description">
-          Nifty 50 was held up by a few heavyweights (46 Adv / 4 Dec), but across the entire NSE exchange, 1,343 stocks declined while only 674 advanced (ADR: 0.50 : 1). The rally lacks broad participation and carries high false-breakout risk.
+          Broad market distribution confirmed. Declines lead advances exchange-wide. Defend capital and avoid fresh cash equity long breakouts.
         </p>
       </div>
 
@@ -357,7 +357,7 @@
             <span class="text-xs text-slate-400 mono">points spread</span>
           </div>
           <div class="text-[11px] text-slate-400 mt-2" id="futures-basis-desc">
-            Futures: <b class="text-white mono" id="fut-price-ref">--</b> vs Spot: <b class="text-white mono" id="nifty-spot-ref">--</b>
+            Futures: <b class="text-white mono" id="fut-price-ref">--</b> vs Spot: <b class="text-white mono" id="nifty-spot-ref">--</b> <span id="fut-spot-ref" class="hidden">--</span>
           </div>
         </div>
       </div>
@@ -531,6 +531,14 @@
     let latestData = null;
     let pipWindow = null;
 
+    // Dynamic host-aware navbar routing
+    const isCloud = window.location.hostname.includes('render.com') || (window.location.hostname !== '127.0.0.1' && window.location.hostname !== 'localhost');
+    const scannerLink = document.getElementById('nav-scanner-link');
+    if (scannerLink) {
+      scannerLink.href = isCloud ? 'https://finplus-stock-scanner.onrender.com' : 'http://127.0.0.1:8001';
+      scannerLink.innerHTML = isCloud ? '<span>🎯 Scanner Cockpit (Cloud) ↗</span>' : '<span>🎯 Scanner Cockpit (:8001) ↗</span>';
+    }
+
     function initWebSocket() {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//${window.location.host}/ws/live`;
@@ -558,6 +566,21 @@
 
       ws.onerror = () => ws.close();
     }
+
+    async function pollLiveBreadth() {
+      try {
+        const res = await fetch('/api/breadth');
+        if (res.ok) {
+          const data = await res.json();
+          updateUI(data);
+        }
+      } catch (err) {
+        console.warn("3-second HTTP poll error:", err);
+      }
+    }
+    // Guaranteed 3-second price & breadth updates
+    setInterval(pollLiveBreadth, 3000);
+    pollLiveBreadth();
 
     function updateUI(data) {
       if (!data) return;
@@ -740,7 +763,7 @@
       document.getElementById('broad-adv-pct').textContent = `${((adv / totalStocks) * 100).toFixed(1)}% of Market`;
       document.getElementById('broad-dec-pct').textContent = `${((dec / totalStocks) * 100).toFixed(1)}% of Market`;
 
-      const nWabi = data.nifty ? (data.nifty.wabi_score || 0.84) : 0.84;
+      const nWabi = (data.nifty && data.nifty.wabi_score !== undefined) ? data.nifty.wabi_score : 0.0;
       document.getElementById('trend-quick-summary').textContent = `2,266 NSE Stocks (ADR ${adr} : 1) • Nifty WABI ${nWabi >= 0 ? '+' : ''}${nWabi.toFixed(2)}`;
 
       if (bm.total_market_turnover_crores) {
