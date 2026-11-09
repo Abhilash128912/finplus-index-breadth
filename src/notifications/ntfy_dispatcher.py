@@ -72,6 +72,8 @@ class NTFYDispatcher:
         headers = {
             "Title": _safe_header_title(title),
             "Priority": str(priority),
+            "Markdown": "yes",
+            "X-Markdown": "yes",
         }
         if tags:
             headers["Tags"] = ",".join(tags)

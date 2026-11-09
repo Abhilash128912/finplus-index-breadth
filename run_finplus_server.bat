@@ -9,3 +9,4 @@ echo ========================================================
 cd /d "D:\AI_APPS"
 python -m uvicorn finplus_index_breadth.src.api.server:app --host 127.0.0.1 --port 8000 --reload
 pause
+
