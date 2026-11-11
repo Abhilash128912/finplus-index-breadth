@@ -53,6 +53,8 @@ class MarketRegimeEngine:
         nifty_hw_above = sum(1 for v in nifty_hw.values() if v == "ABOVE_VWAP")
         nifty_spot = float(broad_market.get("nifty_spot", 24925.0)) if broad_market else 24925.0
         nifty_chg = broad_market.get("nifty_change_pct", 0.0) if broad_market else 0.0
+        sensex_spot = float(broad_market.get("sensex_spot", 82300.0)) if broad_market else 82300.0
+        sensex_chg = broad_market.get("sensex_change_pct", 0.0) if broad_market else 0.0
 
         # Extract Broad Market metrics (All 2,266 NSE Stocks)
         bm_data = broad_market.get("broad_market", {}) if broad_market else {}
@@ -340,6 +342,8 @@ class MarketRegimeEngine:
             "metrics": {
                 "nifty_spot": nifty_spot,
                 "nifty_change_pct": nifty_chg,
+                "sensex_spot": sensex_spot,
+                "sensex_change_pct": sensex_chg,
                 "nifty_wabi": nifty_wabi,
                 "nifty_above_vwap_pct": nifty_above_pct,
                 "heavyweights_above": f"{nifty_hw_above}/5",
