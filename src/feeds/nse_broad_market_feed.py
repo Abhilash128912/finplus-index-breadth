@@ -283,13 +283,13 @@ class NSEBroadMarketFeed:
                 live_change_pct = -0.34
 
         # Live Sensex 30 spot & change
-        sensex_spot = 80757.2
-        sensex_chg_pct = -0.33
+        sensex_spot = 82300.0
+        sensex_chg_pct = 0.0
         try:
             import yfinance as yf
             _t = yf.Ticker('^BSESN')
-            _p = _t.fast_info.get('last_price')
-            _prev = _t.fast_info.get('previous_close')
+            _p = getattr(_t.fast_info, 'last_price', None) or _t.fast_info.get('lastPrice')
+            _prev = getattr(_t.fast_info, 'previous_close', None) or _t.fast_info.get('previousClose')
             if _p and _prev:
                 sensex_spot = round(float(_p), 2)
                 sensex_chg_pct = round(((_p - _prev) / _prev) * 100.0, 2)
@@ -297,7 +297,7 @@ class NSEBroadMarketFeed:
                 _h = _t.history(period='1d', interval='1m')
                 if not _h.empty:
                     sensex_spot = round(float(_h.iloc[-1]['Close']), 2)
-                    _prev = _t.fast_info.get('previous_close') or sensex_spot
+                    _prev = getattr(_t.fast_info, 'previous_close', None) or sensex_spot
                     sensex_chg_pct = round(((sensex_spot - _prev) / _prev) * 100.0, 2)
         except Exception:
             pass
