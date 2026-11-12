@@ -97,19 +97,19 @@ def shutdown_event() -> None:
     scheduler.stop()
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def serve_index() -> FileResponse:
     """Serves the institutional dashboard frontend."""
     return FileResponse(FRONTEND_DIR / "index.html")
 
 
-@app.get("/cockpit")
+@app.api_route("/cockpit", methods=["GET", "HEAD"])
 async def serve_cockpit() -> FileResponse:
     """Serves the Master Multi-Pane Cockpit HUD."""
     return FileResponse(FRONTEND_DIR / "cockpit.html")
 
 
-@app.get("/api/status")
+@app.api_route("/api/status", methods=["GET", "HEAD"])
 async def get_health_status() -> Dict[str, Any]:
     """Health check endpoint and Render keep-alive ping."""
     return {
@@ -121,7 +121,7 @@ async def get_health_status() -> Dict[str, Any]:
     }
 
 
-@app.get("/api/regime")
+@app.api_route("/api/regime", methods=["GET", "HEAD"])
 async def get_market_regime() -> Dict[str, Any]:
     """Returns the intraday market trend regime and equity/option trading directives."""
     if not scheduler.latest_regime_result:
