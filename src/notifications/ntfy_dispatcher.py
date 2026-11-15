@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import datetime
 import os
+import time
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -68,6 +69,15 @@ class NTFYDispatcher:
         actions: Optional[str] = None,
     ) -> bool:
         """Sends push notification to registered topics with standard normal font size."""
+        # Environment Gate: Block all NTFY sends unless running on Render Cloud
+        is_render = bool(os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"))
+        if not is_render:
+            now = time.time()
+            if now - getattr(self, "_last_suppress_log_ts", 0.0) >= 3600.0:
+                self._last_suppress_log_ts = now
+                logger.info("NTFY suppressed (not on Render)")
+            return False
+
         headers = {
             "Title": _safe_header_title(title),
             "Priority": str(priority),
