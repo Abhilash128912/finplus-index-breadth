@@ -3,7 +3,7 @@ FinPlus+ Institutional Market Regime & Intraday Decision Engine
 ==============================================================
 Module: finplus_index_breadth.analytics.market_regime_engine
 Author: FinPlus+ Enterprise Infrastructure
-Standard: ISO-8601, Zero Fabricated Data, Strict Confluence
+Standard: ISO-8601, Zero Fabricated Data, Strict Confluence, Stateful Hysteresis
 
 Answers the core trading questions:
 1. What is the market trend right now?
@@ -15,34 +15,345 @@ Answers the core trading questions:
 2. Should I buy or sell equities intraday?
 3. Whether I need to buy options today or not?
 4. End-of-Day BTST Status (relegated to afternoon / 3:10-3:30 PM).
+
+Features:
+- Multi-band hysteresis: Prevents flip-flop wiggles around boundaries.
+- Confirmation gate: Requires N=3 consecutive cycles to confirm a new regime.
+- Cooldown timer: 15-minute suppression window unless moving across 2+ levels.
+- Pre-market auction suppression: Completely silent before 09:15 IST.
+- Persistent state: Preserves last alerted regime across server restarts.
 """
 
 from __future__ import annotations
 
 import datetime
+import json
+import os
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from finplus_core.utils.logger import get_finplus_logger
+
+try:
+    from config.regime_config import (
+        STRONG_UPTREND_ENTER,
+        STRONG_UPTREND_EXIT,
+        UPTREND_ENTER,
+        UPTREND_EXIT,
+        DOWNTREND_ENTER,
+        DOWNTREND_EXIT,
+        STRONG_DOWNTREND_ENTER,
+        STRONG_DOWNTREND_EXIT,
+        REGIME_CONFIRMATION_COUNT,
+        REGIME_ALERT_COOLDOWN_SECONDS,
+        DEFAULT_REGIME_STATE_PATH,
+        REGIME_LEVELS,
+        REGIME_LABELS,
+    )
+except ImportError:
+    from finplus_index_breadth.config.regime_config import (
+        STRONG_UPTREND_ENTER,
+        STRONG_UPTREND_EXIT,
+        UPTREND_ENTER,
+        UPTREND_EXIT,
+        DOWNTREND_ENTER,
+        DOWNTREND_EXIT,
+        STRONG_DOWNTREND_ENTER,
+        STRONG_DOWNTREND_EXIT,
+        REGIME_CONFIRMATION_COUNT,
+        REGIME_ALERT_COOLDOWN_SECONDS,
+        DEFAULT_REGIME_STATE_PATH,
+        REGIME_LEVELS,
+        REGIME_LABELS,
+    )
 
 logger = get_finplus_logger("MarketRegimeEngine")
 
 IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
 
 
+class MarketRegimeStateManager:
+    """
+    Manages persistent state, multi-band hysteresis, N=3 confirmation,
+    and 15-minute cooldown alerting rules for market regime transitions.
+    """
+
+    def __init__(
+        self,
+        state_file: Optional[Path | str] = None,
+        confirmation_count: int = REGIME_CONFIRMATION_COUNT,
+        cooldown_seconds: int = REGIME_ALERT_COOLDOWN_SECONDS,
+    ):
+        self.state_file = Path(state_file) if state_file else DEFAULT_REGIME_STATE_PATH
+        self.confirmation_count = confirmation_count
+        self.cooldown_seconds = cooldown_seconds
+
+        # Core state variables
+        self.current_regime: str = "CHOPPY"
+        self.last_alerted_regime: Optional[str] = None
+        self.last_alert_time: float = 0.0
+        self.pending_candidate: Optional[str] = None
+        self.pending_count: int = 0
+        self.opened_alert_date: Optional[str] = None
+
+        self.load_state()
+
+    def load_state(self) -> None:
+        """Loads persisted state from JSON file."""
+        if self.state_file and self.state_file.exists():
+            try:
+                with open(self.state_file, "r", encoding="utf-8") as f:
+                    d = json.load(f)
+                    self.current_regime = d.get("current_regime", "CHOPPY")
+                    self.last_alerted_regime = d.get("last_alerted_regime")
+                    self.last_alert_time = float(d.get("last_alert_time", 0.0))
+                    self.pending_candidate = d.get("pending_candidate")
+                    self.pending_count = int(d.get("pending_count", 0))
+                    self.opened_alert_date = d.get("opened_alert_date")
+            except Exception as e:
+                logger.warning("Could not load regime state from %s: %s", self.state_file, e)
+
+    def save_state(self) -> None:
+        """Persists current state to JSON file."""
+        if not self.state_file:
+            return
+        try:
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+            d = {
+                "current_regime": self.current_regime,
+                "last_alerted_regime": self.last_alerted_regime,
+                "last_alert_time": self.last_alert_time,
+                "pending_candidate": self.pending_candidate,
+                "pending_count": self.pending_count,
+                "opened_alert_date": self.opened_alert_date,
+                "updated_at": datetime.datetime.now(tz=IST).isoformat(),
+            }
+            with open(self.state_file, "w", encoding="utf-8") as f:
+                json.dump(d, f, indent=2)
+        except Exception as e:
+            logger.warning("Could not save regime state to %s: %s", self.state_file, e)
+
+    @classmethod
+    def compute_hysteresis_zone(cls, score: int, current_regime: str, is_divergence: bool = False) -> str:
+        """
+        Calculates raw regime zone using multi-band hysteresis entry/exit thresholds.
+        Between boundary bands, retains the current regime to eliminate flip-flop wobbles.
+        """
+        if is_divergence:
+            return "CHOPPY_DIVERGENT"
+
+        cur = current_regime or "CHOPPY"
+
+        if cur == "STRONG_UPTREND":
+            if score < STRONG_UPTREND_EXIT:  # < 50
+                if score < UPTREND_EXIT:      # < 15
+                    if score <= STRONG_DOWNTREND_ENTER:  # <= -60
+                        return "STRONG_DOWNTREND"
+                    elif score <= DOWNTREND_ENTER:       # <= -25
+                        return "DOWNTREND"
+                    else:
+                        return "CHOPPY"
+                else:
+                    return "UPTREND"
+            else:
+                return "STRONG_UPTREND"  # 50-59 retains STRONG_UPTREND
+
+        elif cur == "UPTREND":
+            if score >= STRONG_UPTREND_ENTER:  # >= 60
+                return "STRONG_UPTREND"
+            elif score < UPTREND_EXIT:         # < 15
+                if score <= STRONG_DOWNTREND_ENTER:
+                    return "STRONG_DOWNTREND"
+                elif score <= DOWNTREND_ENTER:
+                    return "DOWNTREND"
+                else:
+                    return "CHOPPY"
+            else:
+                return "UPTREND"  # 15-59 retains UPTREND (50-59 stays UPTREND until >= 60)
+
+        elif cur in ("CHOPPY", "CHOPPY_DIVERGENT"):
+            if score >= STRONG_UPTREND_ENTER:  # >= 60
+                return "STRONG_UPTREND"
+            elif score >= UPTREND_ENTER:       # >= 25
+                return "UPTREND"
+            elif score <= STRONG_DOWNTREND_ENTER:  # <= -60
+                return "STRONG_DOWNTREND"
+            elif score <= DOWNTREND_ENTER:     # <= -25
+                return "DOWNTREND"
+            else:
+                return "CHOPPY"  # -24 to +24 retains CHOPPY
+
+        elif cur == "DOWNTREND":
+            if score <= STRONG_DOWNTREND_ENTER:  # <= -60
+                return "STRONG_DOWNTREND"
+            elif score > DOWNTREND_EXIT:         # > -15
+                if score >= STRONG_UPTREND_ENTER:
+                    return "STRONG_UPTREND"
+                elif score >= UPTREND_ENTER:
+                    return "UPTREND"
+                else:
+                    return "CHOPPY"
+            else:
+                return "DOWNTREND"  # -59 to -15 retains DOWNTREND
+
+        elif cur == "STRONG_DOWNTREND":
+            if score > STRONG_DOWNTREND_EXIT:    # > -50
+                if score >= STRONG_UPTREND_ENTER:
+                    return "STRONG_UPTREND"
+                elif score >= UPTREND_ENTER:
+                    return "UPTREND"
+                elif score > DOWNTREND_EXIT:
+                    return "CHOPPY"
+                else:
+                    return "DOWNTREND"
+            else:
+                return "STRONG_DOWNTREND"  # <= -50 retains STRONG_DOWNTREND
+
+        return "CHOPPY"
+
+    def process_evaluation(
+        self,
+        score: int,
+        is_divergence: bool = False,
+        now_dt: Optional[datetime.datetime] = None,
+    ) -> Dict[str, Any]:
+        """
+        Evaluates score against hysteresis, enforces N=3 confirmation,
+        evaluates 15-minute cooldown / 2+ level jump rule, and manages alert dispatching.
+        """
+        if now_dt is None:
+            now_dt = datetime.datetime.now(tz=IST)
+
+        now_ts = now_dt.timestamp()
+        today_str = now_dt.strftime("%Y-%m-%d")
+        is_weekday = (now_dt.weekday() < 5)
+        h = now_dt.hour
+        m = now_dt.minute
+
+        # NSE Regular Market Hours: Mon-Fri 09:15 to 15:30 IST
+        is_market_hours = is_weekday and (
+            (h == 9 and m >= 15) or
+            (10 <= h < 15) or
+            (h == 15 and m <= 30)
+        )
+        is_pre_market = is_weekday and (
+            (h < 9) or (h == 9 and m < 15)
+        )
+
+        # 1. Calculate raw target zone using Hysteresis
+        raw_zone = self.compute_hysteresis_zone(score, self.current_regime, is_divergence)
+
+        # 2. Confirmation Logic (N consecutive evaluations in new zone)
+        regime_flipped = False
+        prev_confirmed = self.current_regime
+
+        if raw_zone != self.current_regime:
+            if raw_zone == self.pending_candidate:
+                self.pending_count += 1
+            else:
+                self.pending_candidate = raw_zone
+                self.pending_count = 1
+
+            if self.pending_count >= self.confirmation_count:
+                self.current_regime = raw_zone
+                self.pending_candidate = None
+                self.pending_count = 0
+                regime_flipped = True
+        else:
+            self.pending_candidate = None
+            self.pending_count = 0
+
+        # 3. Alert Eligibility Evaluation
+        should_alert = False
+        alert_reason = ""
+        suppression_reason = ""
+
+        # Requirement 4: Suppress alerts before 09:15 IST (pre-open auction)
+        if not is_market_hours:
+            suppression_reason = "PRE_MARKET_AUCTION" if is_pre_market else "OFF_HOURS"
+        else:
+            is_opening_cycle = (self.opened_alert_date != today_str and h == 9 and 15 <= m <= 20)
+
+            # Requirement 5: Trigger alerts ONLY when confirmed regime differs from last_alerted_regime
+            if self.current_regime != self.last_alerted_regime:
+                cur_level = REGIME_LEVELS.get(self.current_regime, 0)
+                last_level = REGIME_LEVELS.get(self.last_alerted_regime, 0) if self.last_alerted_regime else 0
+                level_diff = abs(cur_level - last_level)
+                time_since_last_alert = now_ts - self.last_alert_time
+
+                if is_opening_cycle:
+                    # Single opening alert at 09:15 if regime differs from last alerted
+                    should_alert = True
+                    alert_reason = "OPENING_MARKET_SYNC"
+                    self.opened_alert_date = today_str
+                elif time_since_last_alert < self.cooldown_seconds and level_diff < 2:
+                    # Requirement 3: 15-min cooldown unless moving across 2+ levels
+                    rem_cd = int(self.cooldown_seconds - time_since_last_alert)
+                    suppression_reason = f"COOLDOWN_ACTIVE ({rem_cd}s remaining, level_diff={level_diff})"
+                else:
+                    should_alert = True
+                    alert_reason = "LEVEL_2_JUMP" if level_diff >= 2 else "REGIME_TRANSITION"
+
+        transition = {}
+        if should_alert:
+            transition = {
+                "from_code": self.last_alerted_regime or "CHOPPY",
+                "from_label": REGIME_LABELS.get(self.last_alerted_regime, "CHOPPY / SIDEWAYS"),
+                "to_code": self.current_regime,
+                "to_label": REGIME_LABELS.get(self.current_regime, self.current_regime),
+            }
+            self.last_alerted_regime = self.current_regime
+            self.last_alert_time = now_ts
+
+        # Requirement 6: Persist state
+        self.save_state()
+
+        return {
+            "current_regime": self.current_regime,
+            "raw_zone": raw_zone,
+            "pending_candidate": self.pending_candidate,
+            "pending_count": self.pending_count,
+            "last_alerted_regime": self.last_alerted_regime,
+            "last_alert_time": self.last_alert_time,
+            "should_alert": should_alert,
+            "alert_reason": alert_reason,
+            "suppression_reason": suppression_reason,
+            "transition": transition,
+            "regime_flipped": regime_flipped,
+        }
+
+
 class MarketRegimeEngine:
     """Evaluates macro breadth and constituent momentum to determine intraday trading directives."""
 
-    @staticmethod
+    _state_manager: Optional[MarketRegimeStateManager] = None
+
+    @classmethod
+    def get_state_manager(cls, state_file: Optional[Path | str] = None) -> MarketRegimeStateManager:
+        """Returns singleton MarketRegimeStateManager instance."""
+        if cls._state_manager is None or state_file is not None:
+            cls._state_manager = MarketRegimeStateManager(state_file=state_file)
+        return cls._state_manager
+
+    @classmethod
+    def reset_state_manager(cls, state_file: Optional[Path | str] = None) -> MarketRegimeStateManager:
+        """Resets state manager for testing."""
+        cls._state_manager = MarketRegimeStateManager(state_file=state_file)
+        return cls._state_manager
+
+    @classmethod
     def evaluate_regime(
+        cls,
         nifty_breadth: Dict[str, Any],
         sensex_breadth: Dict[str, Any],
         broad_market: Optional[Dict[str, Any]] = None,
+        now_dt: Optional[datetime.datetime] = None,
     ) -> Dict[str, Any]:
         """
         Synthesizes exchange-wide (2,266 stocks) breadth and benchmark constituent data
         to produce actionable intraday directives for equities and options trading.
         """
-        now = datetime.datetime.now(tz=IST)
+        now = now_dt or datetime.datetime.now(tz=IST)
 
         # Extract Benchmark metrics
         nifty_wabi = nifty_breadth.get("wabi_score", 0.0)
@@ -122,77 +433,66 @@ class MarketRegimeEngine:
 
         if nifty_chg >= 0:
             if vix_val <= 16.0 and vix_chg_pct <= 0:
-                raw_score += 10.0  # Calm institutional accumulation
+                raw_score += 10.0
             elif vix_chg_pct >= 5.0:
-                raw_score -= 10.0  # Volatility spike divergence (hedging alert)
+                raw_score -= 10.0
         else:
             if vix_chg_pct >= 5.0:
-                raw_score -= 10.0  # Panic liquidation
+                raw_score -= 10.0
             elif vix_chg_pct <= 0:
-                raw_score -= 5.0   # Orderly decline
+                raw_score -= 5.0
 
         if fut_basis >= 10.0:
-            raw_score += 5.0   # Institutional futures premium
+            raw_score += 5.0
         elif fut_basis <= -15.0:
-            raw_score -= 5.0   # Cautious futures discount
+            raw_score -= 5.0
 
         score = max(-100, min(100, round(raw_score)))
 
         # -------------------------------------------------------------
-        # 2. DIVERGENCE VETO GUARD & REGIME CLASSIFICATION
+        # 2. DIVERGENCE VETO GUARD & HYSTERESIS REGIME CLASSIFICATION
         # -------------------------------------------------------------
-        # Is there a severe divergence between bluechips and the wider exchange?
         is_divergence = False
         if (nifty_wabi >= 0.25 or sensex_wabi >= 0.25) and (bm_adr < 0.85 or bm_dec > bm_adv + 300):
             is_divergence = True
 
-        trend_code = "CHOPPY"
-        trend_label = "CHOPPY / SIDEWAYS"
-        trend_description = ""
-        trend_color = "amber"
+        # Process through state manager (Hysteresis, Confirmation, Cooldown, Market Hours)
+        mgr = cls.get_state_manager()
+        regime_step = mgr.process_evaluation(score=score, is_divergence=is_divergence, now_dt=now)
+        trend_code = regime_step["current_regime"]
+        trend_label = REGIME_LABELS.get(trend_code, "CHOPPY / SIDEWAYS")
 
-        if is_divergence:
-            trend_code = "CHOPPY_DIVERGENT"
-            trend_label = "CHOPPY / DIVERGENT (NARROW BLUECHIP RALLY)"
+        # Map color and descriptions
+        if trend_code == "CHOPPY_DIVERGENT":
             trend_color = "amber"
             trend_description = (
                 f"Nifty 50 appears green ({nifty_above_pct:.0f}% > VWAP), but across the full exchange {bm_dec} stocks are falling "
                 f"vs {bm_adv} advancing (ADR: {bm_adr}:1). Composite Score: {score:+d}/100. The rally is concentrated in a few heavyweights."
             )
-        elif score >= 55:
-            trend_code = "STRONG_UPTREND"
-            trend_label = "STRONG UPTREND (ALL-PILLAR CONFLUENCE)"
+        elif trend_code == "STRONG_UPTREND":
             trend_color = "emerald"
             trend_description = (
                 f"High-conviction broad market expansion (Score: {score:+d}/100). Advances lead declines ({bm_adv} Adv vs {bm_dec} Dec, ADR: {bm_adr}:1), "
                 f"{nifty_hw_above}/5 heavyweights are above Day VWAP, and derivatives PCR ({pcr_val:.2f}) confirms institutional floor."
             )
-        elif score >= 20:
-            trend_code = "UPTREND"
-            trend_label = "UPTREND (MODERATE BULL BIAS)"
+        elif trend_code == "UPTREND":
             trend_color = "emerald"
             trend_description = (
                 f"Positive upward bias (Score: {score:+d}/100). Benchmark constituents hold above Day VWAP with supportive market breadth (ADR: {bm_adr}:1)."
             )
-        elif score <= -55:
-            trend_code = "STRONG_DOWNTREND"
-            trend_label = "STRONG DOWNTREND (ALL-MARKET LIQUIDATION)"
+        elif trend_code == "STRONG_DOWNTREND":
             trend_color = "rose"
             trend_description = (
                 f"High-conviction institutional liquidation (Score: {score:+d}/100). Declines overwhelm advances across exchange ({bm_dec} Dec vs {bm_adv} Adv, ADR: {bm_adr}:1), "
                 f"and bluechips trade broken below Day VWAP."
             )
-        elif score <= -20:
-            trend_code = "DOWNTREND"
-            trend_label = "DOWNTREND (BEAR DISTRIBUTION)"
+        elif trend_code == "DOWNTREND":
             trend_color = "rose"
             trend_description = (
                 f"Bearish distribution dominant (Score: {score:+d}/100). Declines lead advances across the wider exchange (ADR: {bm_adr}:1), "
                 f"with persistent selling pressure in benchmark constituents."
             )
-        else:
-            trend_code = "CHOPPY"
-            trend_label = "CHOPPY / RANGEBOUND (SIDEWAYS)"
+        else:  # CHOPPY
             trend_color = "amber"
             trend_description = (
                 f"Market is caught in an equilibrium tug-of-war without institutional thrust (Score: {score:+d}/100). "
@@ -200,7 +500,7 @@ class MarketRegimeEngine:
             )
 
         # -------------------------------------------------------------
-        # 2. INTRADAY EQUITIES DIRECTIVE ("Should I Buy or Sell Equities Intraday?")
+        # 3. INTRADAY EQUITIES DIRECTIVE
         # -------------------------------------------------------------
         if trend_code == "STRONG_UPTREND":
             equity_action = "BUY EQUITIES INTRADAY (LONG ON DIPS)"
@@ -244,61 +544,52 @@ class MarketRegimeEngine:
             )
 
         # -------------------------------------------------------------
-        # 3. INTRADAY OPTIONS BUYING DIRECTIVE ("Whether I need to Buy Options Today or Not?")
+        # 4. INTRADAY OPTIONS BUYING DIRECTIVE
         # -------------------------------------------------------------
-        vix_info = broad_market.get("vix", {}) if broad_market else {}
-        deriv_info = broad_market.get("derivatives", {}) if broad_market else {}
-        vix_val = float(vix_info.get("value") or 15.5)
-        vix_chg_pct = float(vix_info.get("change_pct") or 0.0)
-        pcr_val = float(deriv_info.get("index_options_pcr") or 0.85)
-
-        # Volatility & Derivatives Context Modifiers
-        vol_note = ""
-        if vix_val < 12.0:
-            vol_note += f" ⚠️ Low VIX ({vix_val:.1f}): Sluggish ranges amplify theta decay for option buyers."
-        elif vix_val > 20.0:
-            vol_note += f" ⚡ High VIX ({vix_val:.1f}): Premium inflation and sharp intraday swings. Use wider stops."
-        
-        if pcr_val < 0.80:
-            vol_note += f" 🧱 Call Writing Resistance: Index Options PCR is {pcr_val:.2f} (< 0.85), indicating institutional sellers defending overhead strikes."
-        elif pcr_val >= 1.25:
-            vol_note += f" 🛡️ Put Writing Floor: Index Options PCR is {pcr_val:.2f} (>= 1.25), confirming solid institutional floor on pullbacks."
-
+        vol_note = f" (VIX: {vix_val:.2f}, PCR: {pcr_val:.2f})"
         if trend_code == "STRONG_UPTREND":
-            option_action = "CALL BUYING PERMITTED (CE)"
-            option_badge = "FAVORABLE FOR OPTION BUYERS"
+            option_action = "CALL OPTIONS BUYING PERMITTED (HIGH PROBABILITY)"
+            option_badge = "BUY CALLS"
             option_color = "emerald"
             option_guidance = (
-                "Today is an Option Buyer's Day on the Long side! Directional momentum and volume thrust will outpace theta decay. "
-                f"Target ATM or slightly OTM Nifty/Sensex Calls.{vol_note}"
+                "Market breadth and benchmark momentum strongly support upside expansion. Buy near-the-money Call options "
+                f"on intraday pullback to VWAP. Strict stop-loss at 20-30% premium.{vol_note}"
+            )
+        elif trend_code == "UPTREND":
+            option_action = "SELECTIVE OPTION BUYING ONLY (STRICT TRAILING STOPS)"
+            option_badge = "SELECTIVE CALLS"
+            option_color = "emerald"
+            option_guidance = (
+                "Bullish bias present, but momentum lacks all-pillar thrust. Limit size to 50% normal allocation. "
+                f"Do not hold decaying options into chop.{vol_note}"
             )
         elif trend_code == "STRONG_DOWNTREND":
-            option_action = "PUT BUYING PERMITTED (PE)"
-            option_badge = "FAVORABLE FOR OPTION BUYERS"
+            option_action = "PUT OPTIONS BUYING PERMITTED (HIGH PROBABILITY)"
+            option_badge = "BUY PUTS"
             option_color = "rose"
             option_guidance = (
-                "Today is an Option Buyer's Day on the Short side! High downward velocity will rapidly expand Put premiums. "
-                f"Target ATM or slightly OTM Puts.{vol_note}"
+                "Aggressive selling across broad market. Buy near-the-money Put options on weak bounces to VWAP. "
+                f"Trail stop-loss aggressively.{vol_note}"
             )
-        elif trend_code in ("UPTREND", "DOWNTREND"):
-            option_action = "SELECTIVE OPTION BUYING ONLY (STRICT TRAILING STOPS)"
-            option_badge = "MODERATE RISK"
+        elif trend_code == "DOWNTREND":
+            option_action = "SELECTIVE PUT BUYING ONLY (HIGH DISCIPLINE)"
+            option_badge = "SELECTIVE PUTS"
+            option_color = "rose"
+            option_guidance = (
+                "Bearish pressure dominant. Limit Put buying to confirmed breakdown retests. "
+                f"Take profits quickly into sudden flushes.{vol_note}"
+            )
+        else:  # CHOPPY or CHOPPY_DIVERGENT
+            option_action = "DO NOT BUY OPTIONS TODAY (CHOP / HIGH THETA DECAY RISK)"
+            option_badge = "NO TRADE (OPTIONS)"
             option_color = "amber"
-            option_guidance = (
-                "Option buying is permissible only with strict discipline. Move stop loss to breakeven quickly. "
-                f"Prefer ATM options only; OTM options risk decay if trend stalls.{vol_note}"
-            )
-        else:  # CHOPPY / DIVERGENT
-            option_action = "DO NOT BUY OPTIONS TODAY (HIGH THETA DECAY / CHOP)"
-            option_badge = "DO NOT BUY OPTIONS"
-            option_color = "rose"
             option_guidance = (
                 "DO NOT BUY OPTIONS TODAY! The market lacks sustained directional impulse. Buying options today carries an "
                 f"85%+ probability of capital erosion via theta decay and false intraday swings. Let option sellers fight—stay in cash.{vol_note}"
             )
 
         # -------------------------------------------------------------
-        # 4. TIME-OF-DAY AND BTST STATUS
+        # 5. TIME-OF-DAY AND BTST STATUS
         # -------------------------------------------------------------
         hour = now.hour
         minute = now.minute
@@ -335,22 +626,24 @@ class MarketRegimeEngine:
                 "color": option_color,
                 "guidance": option_guidance,
             },
-            "btst_window_status": {
-                "is_active_now": is_btst_window,
-                "status_label": btst_time_status,
-            },
+            "btst_status": btst_time_status,
             "metrics": {
                 "nifty_spot": nifty_spot,
                 "nifty_change_pct": nifty_chg,
                 "sensex_spot": sensex_spot,
                 "sensex_change_pct": sensex_chg,
-                "nifty_wabi": nifty_wabi,
-                "nifty_above_vwap_pct": nifty_above_pct,
-                "heavyweights_above": f"{nifty_hw_above}/5",
-                "broad_advances": bm_adv,
-                "broad_declines": bm_dec,
-                "broad_adr": bm_adr,
-                "broad_total": bm_total,
+                "advance_decline_ratio": bm_adr,
+                "broad_market_advances": bm_adv,
+                "broad_market_declines": bm_dec,
+                "nifty_heavyweights_above_vwap": f"{nifty_hw_above}/5",
+                "vix_value": vix_val,
+                "options_pcr": pcr_val,
             },
+            "regime_step": regime_step,
+            "should_alert": regime_step["should_alert"],
+            "alert_reason": regime_step["alert_reason"],
+            "suppression_reason": regime_step["suppression_reason"],
+            "transition": regime_step["transition"],
+            "confirmed_regime": trend_code,
+            "raw_score": score,
         }
-

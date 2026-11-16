@@ -273,31 +273,28 @@ class MarketScheduler:
                     (hour == 15 and minute <= 30)
                 )
 
-                # 0. Check for Real-time Market Regime Transition (Instant Flip Alert on NTFY)
-                current_label = self.latest_regime_result.get("trend", {}).get("label")
-                if current_label:
-                    if self._last_regime_label is not None and self._last_regime_label != current_label:
-                        if is_nse_market_open:
-                            logger.info(
-                                "Real-time Regime Transition: %s -> %s. Firing instant NTFY alert!",
-                                self._last_regime_label,
-                                current_label,
-                            )
-                            self.dispatcher.send_regime_flip_alert(
-                                self._last_regime_label,
-                                self.latest_regime_result,
-                                snapshot,
-                            )
-                        else:
-                            logger.info(
-                                "Regime Transition %s -> %s suppressed (outside NSE market hours: %02d:%02d IST, weekday=%s)",
-                                self._last_regime_label,
-                                current_label,
-                                hour,
-                                minute,
-                                is_weekday,
-                            )
-                    self._last_regime_label = current_label
+                # 0. Check for Real-time Market Regime Transition Alert (Governed by MarketRegimeEngine)
+                if self.latest_regime_result.get("should_alert"):
+                    trans = self.latest_regime_result.get("transition", {})
+                    prev_label = trans.get("from_label", self._last_regime_label or "CHOPPY / SIDEWAYS")
+                    new_label = self.latest_regime_result.get("trend", {}).get("label")
+                    reason = self.latest_regime_result.get("alert_reason", "REGIME_TRANSITION")
+                    logger.info(
+                        "Confirmed Regime Transition Alert (%s): %s -> %s. Firing NTFY alert!",
+                        reason,
+                        prev_label,
+                        new_label,
+                    )
+                    self.dispatcher.send_regime_flip_alert(
+                        prev_label,
+                        self.latest_regime_result,
+                        snapshot,
+                    )
+                    self._last_regime_label = new_label
+                else:
+                    supp = self.latest_regime_result.get("suppression_reason")
+                    if supp:
+                        logger.debug("Regime alert suppressed: %s", supp)
 
                 # Format current 30-min slot (e.g., '09:30', '10:00')
                 slot_key = f"{hour:02d}:{(minute // 30) * 30:02d}"
