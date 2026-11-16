@@ -115,8 +115,20 @@ class NTFYDispatcher:
         regime_info: Dict[str, Any],
         breadth_snapshot: Dict[str, Any],
     ) -> bool:
-        """Dispatches immediate notification when the Market Regime transitions."""
-        now_str = datetime.datetime.now(tz=IST).strftime("%H:%M IST")
+        """Dispatches immediate notification when the Market Regime transitions during live market hours."""
+        now_dt = datetime.datetime.now(tz=IST)
+        now_str = now_dt.strftime("%H:%M IST")
+
+        # Market-Hours Gate: Suppress regime flip alerts outside NSE live trading (Mon-Fri 09:15 - 15:30 IST)
+        if now_dt.weekday() >= 5: # Saturday / Sunday
+            logger.info("Regime flip alert suppressed: weekend (%s)", now_dt.strftime("%A"))
+            return False
+        h = now_dt.hour
+        m = now_dt.minute
+        if not ((h == 9 and m >= 15) or (10 <= h < 15) or (h == 15 and m <= 30)):
+            logger.info("Regime flip alert suppressed: outside NSE trading hours (%02d:%02d IST)", h, m)
+            return False
+
         trend = regime_info.get("trend", {})
         new_label = trend.get("label", "CHOPPY")
         score_label = trend.get("score_label", "0 / 100")

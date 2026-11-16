@@ -262,38 +262,55 @@ class MarketScheduler:
                 # Offload blocking HTTP requests (NSE scrape + INDstocks batch quotes) to worker thread
                 snapshot = await asyncio.to_thread(self.refresh_breadth)
 
+                now = datetime.datetime.now(tz=IST)
+                hour = now.hour
+                minute = now.minute
+                is_weekday = (now.weekday() < 5)
+                # Official NSE Equity Trading Hours: Mon-Fri 09:15 to 15:30 IST
+                is_nse_market_open = is_weekday and (
+                    (hour == 9 and minute >= 15) or
+                    (10 <= hour < 15) or
+                    (hour == 15 and minute <= 30)
+                )
+
                 # 0. Check for Real-time Market Regime Transition (Instant Flip Alert on NTFY)
                 current_label = self.latest_regime_result.get("trend", {}).get("label")
                 if current_label:
                     if self._last_regime_label is not None and self._last_regime_label != current_label:
-                        logger.info(
-                            "Real-time Regime Transition: %s -> %s. Firing instant NTFY alert!",
-                            self._last_regime_label,
-                            current_label,
-                        )
-                        self.dispatcher.send_regime_flip_alert(
-                            self._last_regime_label,
-                            self.latest_regime_result,
-                            snapshot,
-                        )
+                        if is_nse_market_open:
+                            logger.info(
+                                "Real-time Regime Transition: %s -> %s. Firing instant NTFY alert!",
+                                self._last_regime_label,
+                                current_label,
+                            )
+                            self.dispatcher.send_regime_flip_alert(
+                                self._last_regime_label,
+                                self.latest_regime_result,
+                                snapshot,
+                            )
+                        else:
+                            logger.info(
+                                "Regime Transition %s -> %s suppressed (outside NSE market hours: %02d:%02d IST, weekday=%s)",
+                                self._last_regime_label,
+                                current_label,
+                                hour,
+                                minute,
+                                is_weekday,
+                            )
                     self._last_regime_label = current_label
-
-                now = datetime.datetime.now(tz=IST)
-                hour = now.hour
-                minute = now.minute
 
                 # Format current 30-min slot (e.g., '09:30', '10:00')
                 slot_key = f"{hour:02d}:{(minute // 30) * 30:02d}"
 
-                # 1. Check for 30-minute Periodic Pulse (09:30 to 15:00 IST)
-                if (9 <= hour < 15 or (hour == 15 and minute == 0)) and (minute in (0, 30)):
+                # 1. Check for 30-minute Periodic Pulse (09:30 to 15:00 IST on trading days)
+                if is_weekday and (9 <= hour < 15 or (hour == 15 and minute == 0)) and (minute in (0, 30)):
                     if self._last_pulse_slot != slot_key:
                         logger.info("Triggering 30-min Market Breadth Pulse for slot %s", slot_key)
                         self.dispatcher.send_periodic_breadth_pulse(snapshot)
                         self._last_pulse_slot = slot_key
 
-                # 2. Check for BTST Recommendation Alert (3:15 PM and 3:25 PM IST)
-                if hour == 15 and minute in (15, 25):
+                # 2. Check for BTST Recommendation Alert (3:15 PM and 3:25 PM IST on trading days)
+                if is_weekday and hour == 15 and minute in (15, 25):
                     btst_slot = f"15:{minute}"
                     if self._last_btst_slot != btst_slot:
                         logger.info("Triggering 3:10-3:30 BTST Alert for slot %s", btst_slot)
