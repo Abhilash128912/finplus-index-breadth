@@ -273,8 +273,8 @@ class MarketScheduler:
                     (hour == 15 and minute <= 30)
                 )
 
-                # 0. Check for Real-time Market Regime Transition Alert (Governed by MarketRegimeEngine)
-                if self.latest_regime_result.get("should_alert"):
+                # 0. Check for Real-time Market Regime Transition Alert (Governed by MarketRegimeEngine & Live Market Hours)
+                if is_nse_market_open and self.latest_regime_result.get("should_alert"):
                     trans = self.latest_regime_result.get("transition", {})
                     prev_label = trans.get("from_label", self._last_regime_label or "CHOPPY / SIDEWAYS")
                     new_label = self.latest_regime_result.get("trend", {}).get("label")
