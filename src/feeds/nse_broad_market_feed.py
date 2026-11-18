@@ -43,8 +43,43 @@ class NSEBroadMarketFeed:
         self._cached_sensex_chg_pct: float = 0.0
 
     def _fetch_sensex_quote(self) -> tuple[float, float]:
-        """Fetches real-time Sensex 30 spot and change without stale hardcoded fallbacks."""
-        # 1. Direct Yahoo Finance Chart v8 (reliable, fast, no blocked session)
+        """
+        Fetches real-time Sensex 30 spot and change percentage.
+        PRIMARY: Official INDstocks (INDmoney) broker quote feed (BIDX_40000006).
+        BACKUP ONLY: Yahoo Finance / YFinance used strictly as emergency fallback.
+        """
+        # 1. PRIMARY: INDstocks Broker Live Quote Feed
+        try:
+            import os
+            token = os.getenv("INDMONEY_ACCESS_TOKEN") or os.getenv("INDSTOCKS_TOKEN")
+            if not token:
+                try:
+                    from finplus_core.auth import INDMoneyAuthClient
+                    ac = INDMoneyAuthClient()
+                    token = ac.get_valid_token()
+                except Exception:
+                    pass
+
+            if token:
+                headers = {"Authorization": token, "Accept": "application/json"}
+                url = "https://api.indstocks.com/market/quotes/full?scrip-codes=BIDX_40000006"
+                resp = requests.get(url, headers=headers, timeout=2.5)
+                if resp.status_code == 200:
+                    data = resp.json().get("data", {}).get("BIDX_40000006", {})
+                    p = float(data.get("live_price") or 0.0)
+                    chg = float(data.get("day_change_percentage") or 0.0)
+                    if p > 50000:
+                        self._cached_sensex_spot = round(p, 2)
+                        self._cached_sensex_chg_pct = round(chg, 2)
+                        return self._cached_sensex_spot, self._cached_sensex_chg_pct
+        except Exception as ind_err:
+            logger.debug("INDstocks primary Sensex fetch notice: %s", ind_err)
+
+        # 2. Return last cached live tick if valid
+        if self._cached_sensex_spot and self._cached_sensex_spot > 50000:
+            return self._cached_sensex_spot, self._cached_sensex_chg_pct
+
+        # 3. BACKUP ONLY: Emergency Yahoo Finance Chart v8 (if broker API is unreachable)
         try:
             url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EBSESN?interval=1d"
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
@@ -59,9 +94,9 @@ class NSEBroadMarketFeed:
                     self._cached_sensex_chg_pct = chg_pct
                     return self._cached_sensex_spot, self._cached_sensex_chg_pct
         except Exception as e:
-            logger.debug(f"Yahoo chart direct Sensex fetch notice: {e}")
+            logger.debug(f"Yahoo chart backup Sensex fetch notice: {e}")
 
-        # 2. Fallback to yfinance
+        # 4. Fallback to yfinance if all else fails
         try:
             import yfinance as yf
             _t = yf.Ticker('^BSESN')
@@ -74,11 +109,7 @@ class NSEBroadMarketFeed:
                 self._cached_sensex_chg_pct = chg_pct
                 return self._cached_sensex_spot, self._cached_sensex_chg_pct
         except Exception as e:
-            logger.debug(f"yfinance Sensex fetch notice: {e}")
-
-        # 3. Fallback to cached tick if available
-        if self._cached_sensex_spot and self._cached_sensex_spot > 50000:
-            return self._cached_sensex_spot, self._cached_sensex_chg_pct
+            logger.debug(f"yfinance backup Sensex fetch notice: {e}")
 
         return 0.0, 0.0
 
