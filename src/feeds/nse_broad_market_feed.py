@@ -39,6 +39,48 @@ class NSEBroadMarketFeed:
     def __init__(self) -> None:
         self.session = requests.Session()
         self._last_cookie_time: float = 0.0
+        self._cached_sensex_spot: Optional[float] = None
+        self._cached_sensex_chg_pct: float = 0.0
+
+    def _fetch_sensex_quote(self) -> tuple[float, float]:
+        """Fetches real-time Sensex 30 spot and change without stale hardcoded fallbacks."""
+        # 1. Direct Yahoo Finance Chart v8 (reliable, fast, no blocked session)
+        try:
+            url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EBSESN?interval=1d"
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            resp = requests.get(url, headers=headers, timeout=3.0)
+            if resp.status_code == 200:
+                meta = resp.json().get("chart", {}).get("result", [{}])[0].get("meta", {})
+                price = meta.get("regularMarketPrice")
+                prev = meta.get("chartPreviousClose") or price
+                if price and float(price) > 50000:
+                    chg_pct = round(((float(price) - float(prev)) / float(prev)) * 100.0, 2) if prev else 0.0
+                    self._cached_sensex_spot = round(float(price), 2)
+                    self._cached_sensex_chg_pct = chg_pct
+                    return self._cached_sensex_spot, self._cached_sensex_chg_pct
+        except Exception as e:
+            logger.debug(f"Yahoo chart direct Sensex fetch notice: {e}")
+
+        # 2. Fallback to yfinance
+        try:
+            import yfinance as yf
+            _t = yf.Ticker('^BSESN')
+            _p = getattr(_t.fast_info, 'last_price', None) or (getattr(_t.fast_info, 'get', None) and _t.fast_info.get('lastPrice'))
+            _prev = getattr(_t.fast_info, 'previous_close', None) or (getattr(_t.fast_info, 'get', None) and _t.fast_info.get('previousClose'))
+            if _p and float(_p) > 50000:
+                _prev = float(_prev) if _prev else float(_p)
+                chg_pct = round(((float(_p) - _prev) / _prev) * 100.0, 2)
+                self._cached_sensex_spot = round(float(_p), 2)
+                self._cached_sensex_chg_pct = chg_pct
+                return self._cached_sensex_spot, self._cached_sensex_chg_pct
+        except Exception as e:
+            logger.debug(f"yfinance Sensex fetch notice: {e}")
+
+        # 3. Fallback to cached tick if available
+        if self._cached_sensex_spot and self._cached_sensex_spot > 50000:
+            return self._cached_sensex_spot, self._cached_sensex_chg_pct
+
+        return 0.0, 0.0
 
     def _prime_session(self) -> None:
         """Initializes tracking cookies with NSE."""
@@ -282,25 +324,8 @@ class NSEBroadMarketFeed:
                 live_change = -83.7
                 live_change_pct = -0.34
 
-        # Live Sensex 30 spot & change
-        sensex_spot = 82300.0
-        sensex_chg_pct = 0.0
-        try:
-            import yfinance as yf
-            _t = yf.Ticker('^BSESN')
-            _p = getattr(_t.fast_info, 'last_price', None) or _t.fast_info.get('lastPrice')
-            _prev = getattr(_t.fast_info, 'previous_close', None) or _t.fast_info.get('previousClose')
-            if _p and _prev:
-                sensex_spot = round(float(_p), 2)
-                sensex_chg_pct = round(((_p - _prev) / _prev) * 100.0, 2)
-            else:
-                _h = _t.history(period='1d', interval='1m')
-                if not _h.empty:
-                    sensex_spot = round(float(_h.iloc[-1]['Close']), 2)
-                    _prev = getattr(_t.fast_info, 'previous_close', None) or sensex_spot
-                    sensex_chg_pct = round(((sensex_spot - _prev) / _prev) * 100.0, 2)
-        except Exception:
-            pass
+        # Live Sensex 30 spot & change (dynamic live quote, zero static 82,300 fallback)
+        sensex_spot, sensex_chg_pct = self._fetch_sensex_quote()
 
         return {
             "timestamp": datetime.datetime.now(tz=IST).isoformat(),

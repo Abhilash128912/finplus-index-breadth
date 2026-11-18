@@ -364,7 +364,7 @@ class MarketRegimeEngine:
         nifty_hw_above = sum(1 for v in nifty_hw.values() if v == "ABOVE_VWAP")
         nifty_spot = float(broad_market.get("nifty_spot", 24925.0)) if broad_market else 24925.0
         nifty_chg = broad_market.get("nifty_change_pct", 0.0) if broad_market else 0.0
-        sensex_spot = float(broad_market.get("sensex_spot", 82300.0)) if broad_market else 82300.0
+        sensex_spot = float(broad_market.get("sensex_spot") or 0.0) if broad_market else 0.0
         sensex_chg = broad_market.get("sensex_change_pct", 0.0) if broad_market else 0.0
 
         # Extract Broad Market metrics (All 2,266 NSE Stocks)
