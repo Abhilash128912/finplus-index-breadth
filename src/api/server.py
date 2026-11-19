@@ -135,17 +135,18 @@ async def get_health_status() -> Dict[str, Any]:
 async def get_market_regime() -> Dict[str, Any]:
     """Returns the intraday market trend regime and equity/option trading directives."""
     scheduler.ensure_scheduler_running()
-    if not scheduler.latest_regime_result:
-        scheduler.refresh_breadth()
-    return scheduler.latest_regime_result
+    return scheduler.latest_regime_result or {
+        "status": "INITIALIZING",
+        "regime": "UNKNOWN",
+        "data_status": "PARTIAL",
+        "message": "Market regime initializing in background thread"
+    }
 
 
 @app.api_route("/api/regime/debug", methods=["GET", "HEAD"])
 async def get_regime_debug() -> Dict[str, Any]:
     """Returns field-level debugging telemetry, tick ages, sources, and source errors (zero secrets)."""
     scheduler.ensure_scheduler_running()
-    if not scheduler.latest_regime_result:
-        scheduler.refresh_breadth()
     return scheduler.get_regime_debug_info()
 
 
@@ -155,8 +156,6 @@ async def get_breadth_data() -> Dict[str, Any]:
     import time
     from src.feeds.nse_broad_market_feed import is_regular_nse_market_open
     scheduler.ensure_scheduler_running()
-    if not scheduler.latest_nifty_breadth:
-        scheduler.refresh_breadth()
 
     now_ts = time.time()
     is_market_open = is_regular_nse_market_open()

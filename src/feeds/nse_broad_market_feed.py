@@ -299,7 +299,7 @@ class NSEBroadMarketFeed:
 
         # 1. Fetch Full Exchange Equities (~2,266+ stocks)
         try:
-            r_all = self.session.get(all_stocks_url, headers=self.HEADERS, timeout=8)
+            r_all = self.session.get(all_stocks_url, headers=self.HEADERS, timeout=2.5)
             if r_all.status_code == 200:
                 raw_all_stocks = r_all.json()
                 self.last_errors["nse_breadth"] = None
@@ -311,7 +311,7 @@ class NSEBroadMarketFeed:
 
         # 2. Fetch Index Segments
         try:
-            r_ind = self.session.get(all_indices_url, headers=self.HEADERS, timeout=7)
+            r_ind = self.session.get(all_indices_url, headers=self.HEADERS, timeout=2.5)
             if r_ind.status_code == 200:
                 raw_indices = r_ind.json().get("data", [])
         except Exception as exc:
@@ -319,7 +319,7 @@ class NSEBroadMarketFeed:
 
         # 3. Fetch Turnover
         try:
-            r_turn = self.session.get(turnover_url, headers=self.HEADERS, timeout=6)
+            r_turn = self.session.get(turnover_url, headers=self.HEADERS, timeout=2.5)
             if r_turn.status_code == 200:
                 turnover_data = r_turn.json().get("data", [{}])[0]
         except Exception as exc:
@@ -327,7 +327,7 @@ class NSEBroadMarketFeed:
 
         # 4. Fetch Market Status
         try:
-            r_stat = self.session.get(market_status_url, headers=self.HEADERS, timeout=6)
+            r_stat = self.session.get(market_status_url, headers=self.HEADERS, timeout=2.5)
             if r_stat.status_code == 200:
                 market_state = r_stat.json().get("marketState", [{}])[0]
         except Exception as exc:
@@ -338,7 +338,7 @@ class NSEBroadMarketFeed:
         index_opt_oi = 0
         stock_opt_oi = 0
         try:
-            r_deriv = self.session.get(f"{self.BASE_URL}/api/snapshot-derivatives", headers=self.HEADERS, timeout=6)
+            r_deriv = self.session.get(f"{self.BASE_URL}/api/snapshot-derivatives", headers=self.HEADERS, timeout=2.5)
             if r_deriv.status_code == 200:
                 stats = r_deriv.json().get("fo", {}).get("onlineTradeStats", [])
                 for st in stats:
@@ -355,7 +355,7 @@ class NSEBroadMarketFeed:
         fut_oi = 0
         fut_price = 0.0
         try:
-            r_fut = self.session.get(f"{self.BASE_URL}/api/liveEquity-derivatives?index=nse50_fut", headers=self.HEADERS, timeout=6)
+            r_fut = self.session.get(f"{self.BASE_URL}/api/liveEquity-derivatives?index=nse50_fut", headers=self.HEADERS, timeout=2.5)
             if r_fut.status_code == 200:
                 fut_list = r_fut.json().get("data", [])
                 if fut_list:
