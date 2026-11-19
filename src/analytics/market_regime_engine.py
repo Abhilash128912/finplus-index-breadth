@@ -537,6 +537,10 @@ class MarketRegimeEngine:
         pcr_val = float(deriv_info["index_options_pcr"]) if deriv_info.get("index_options_pcr") is not None else None
         fut_basis = float(deriv_info["nifty_futures_basis"]) if deriv_info.get("nifty_futures_basis") is not None else None
 
+        # If VIX is unavailable, flag data_status as PARTIAL without forcing regime to UNKNOWN
+        if vix_val is None and resolved_status == "OK":
+            resolved_status = "PARTIAL"
+
         # -------------------------------------------------------------
         # 1. INSTITUTIONAL COMPOSITE TREND INDEX (CTI) CALCULATION (-100 to +100)
         # -------------------------------------------------------------
@@ -624,9 +628,10 @@ class MarketRegimeEngine:
             )
         elif trend_code == "STRONG_UPTREND":
             trend_color = "emerald"
+            pcr_clause = f", and derivatives PCR ({pcr_val:.2f}) confirms institutional floor." if pcr_val is not None else "."
             trend_description = (
                 f"High-conviction broad market expansion (Score: {score:+d}/100). Advances lead declines ({bm_adv} Adv vs {bm_dec} Dec, ADR: {bm_adr}:1), "
-                f"{nifty_hw_above}/5 heavyweights are above Day VWAP, and derivatives PCR ({pcr_val:.2f}) confirms institutional floor."
+                f"{nifty_hw_above}/5 heavyweights are above Day VWAP{pcr_clause}"
             )
         elif trend_code == "UPTREND":
             trend_color = "emerald"

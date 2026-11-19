@@ -6,8 +6,16 @@ zero fabricated numeric fallbacks (>1000), and proper UNKNOWN regime handling.
 import ast
 import datetime
 import os
+import sys
 from pathlib import Path
 import pytest
+
+APP_ROOT = Path(__file__).resolve().parent.parent
+AI_APPS_ROOT = APP_ROOT.parent
+if str(AI_APPS_ROOT) not in sys.path:
+    sys.path.insert(0, str(AI_APPS_ROOT))
+if str(APP_ROOT) not in sys.path:
+    sys.path.insert(0, str(APP_ROOT))
 
 from finplus_index_breadth.analytics.market_regime_engine import MarketRegimeEngine, MarketRegimeStateManager
 
@@ -166,3 +174,139 @@ def test_regime_unknown_when_tick_older_than_15s(tmp_path):
     assert res["data_status"] == "STALE"
     assert res["should_alert"] is False
     assert mgr.current_regime == "UPTREND"
+
+
+def test_india_vix_none_scores_cleanly_partial_status(tmp_path):
+    """
+    When india_vix = None, regime scoring runs without error,
+    treats VIX as unavailable (never 0 or default), sets data_status = PARTIAL,
+    and regime is NOT forced to UNKNOWN because spot and breadth are valid.
+    """
+    state_file = tmp_path / "regime_state.json"
+    mgr = MarketRegimeEngine.reset_state_manager(state_file=state_file)
+
+    broad_market = {
+        "nifty_spot": 25250.0,
+        "sensex_spot": 82100.0,
+        "tick_age": 1.2,
+        "data_status": "OK",
+        "vix": {
+            "value": None,
+            "change": None,
+            "change_pct": None,
+        },
+        "broad_market": {
+            "advances": 1600,
+            "declines": 400,
+            "advance_decline_ratio": 4.0,
+            "total_stocks": 2000,
+        },
+        "segments": {
+            "nifty_500": {"advances": 380, "declines": 120},
+        },
+    }
+    nifty_breadth = {
+        "status": "LIVE_STREAMING",
+        "advances": 42,
+        "declines": 8,
+        "wabi_score": 0.68,
+        "stocks_above_vwap_pct": 84.0,
+        "volume_thrust_pct": 80.0,
+        "heavyweights": {"HDFCBANK": "ABOVE_VWAP", "RELIANCE": "ABOVE_VWAP", "ICICIBANK": "ABOVE_VWAP", "INFY": "ABOVE_VWAP", "ITC": "ABOVE_VWAP"},
+    }
+    sensex_breadth = {
+        "status": "LIVE_STREAMING",
+        "advances": 26,
+        "declines": 4,
+        "wabi_score": 0.70,
+    }
+
+    # Evaluate with N=3 confirmation cycles
+    res = None
+    for _ in range(3):
+        res = MarketRegimeEngine.evaluate_regime(nifty_breadth, sensex_breadth, broad_market=broad_market)
+
+    # Must NOT be forced to UNKNOWN (spot and breadth are healthy)
+    assert res["regime"] != "UNKNOWN"
+    assert res["trend"]["code"] in ("UPTREND", "STRONG_UPTREND")
+    # VIX is missing, so overall data_status must be PARTIAL
+    assert res["data_status"] == "PARTIAL"
+    assert res["metrics"]["vix_value"] is None
+
+
+def test_fetch_indstocks_quote_stale_and_http_error(monkeypatch):
+    """
+    _fetch_indstocks_quote contract:
+    - Stale tick (>15s) -> (None, None, age)
+    - HTTP error -> (None, None, age)
+    - No exception raised under any condition
+    """
+    import time
+    from finplus_index_breadth.feeds.nse_broad_market_feed import NSEBroadMarketFeed
+    import requests
+
+    feed = NSEBroadMarketFeed()
+
+    # 1. Stale tick test: cached tick is 25s old, HTTP fails
+    class MockFailResp:
+        status_code = 503
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: MockFailResp())
+
+    feed._quote_time["BIDX_40000006"] = time.time() - 25.0
+    feed._quote_cache["BIDX_40000006"] = {"live_price": 82000.0, "day_change_percentage": 0.5}
+
+    spot, chg, age = feed._fetch_indstocks_quote("BIDX_40000006")
+    assert spot is None
+    assert chg is None
+    assert age >= 25.0
+
+    # 2. HTTP error test with no cache: must return (None, None, age) without raising
+    feed._quote_time.clear()
+    feed._quote_cache.clear()
+
+    spot2, chg2, age2 = feed._fetch_indstocks_quote("BIDX_40000006")
+    assert spot2 is None
+    assert chg2 is None
+    assert age2 >= 900.0
+
+    # 3. Network Exception: must catch and return (None, None, age), no exception raised
+    def raise_network_err(*args, **kwargs):
+        raise requests.ConnectionError("Network connection reset")
+
+    monkeypatch.setattr(requests, "get", raise_network_err)
+    spot3, chg3, age3 = feed._fetch_indstocks_quote("BIDX_40000006")
+    assert spot3 is None
+    assert chg3 is None
+    assert age3 >= 900.0
+
+
+def test_regime_debug_endpoint():
+    """Verify /api/regime/debug returns per-field details and last source errors with zero secrets."""
+    from fastapi.testclient import TestClient
+    from finplus_index_breadth.api.server import app
+
+    client = TestClient(app)
+    resp = client.get("/api/regime/debug")
+    assert resp.status_code == 200
+
+    data = resp.json()
+    assert "data_status" in data
+    assert "fields" in data
+    assert "last_errors" in data
+
+    fields = data["fields"]
+    for req_field in ["nifty_spot", "sensex_spot", "breadth", "india_vix"]:
+        assert req_field in fields, f"Missing field {req_field}"
+        f_obj = fields[req_field]
+        assert "value" in f_obj
+        assert "source" in f_obj
+        assert "tick_age" in f_obj
+        assert "data_status" in f_obj
+
+    last_errors = data["last_errors"]
+    for src in ["nse_breadth", "indstocks_quotes", "vix"]:
+        assert src in last_errors, f"Missing source error key {src}"
+

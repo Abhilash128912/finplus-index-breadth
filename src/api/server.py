@@ -129,6 +129,14 @@ async def get_market_regime() -> Dict[str, Any]:
     return scheduler.latest_regime_result
 
 
+@app.api_route("/api/regime/debug", methods=["GET", "HEAD"])
+async def get_regime_debug() -> Dict[str, Any]:
+    """Returns field-level debugging telemetry, tick ages, sources, and source errors (zero secrets)."""
+    if not scheduler.latest_regime_result:
+        scheduler.refresh_breadth()
+    return scheduler.get_regime_debug_info()
+
+
 @app.get("/api/breadth")
 async def get_breadth_data() -> Dict[str, Any]:
     """Returns the most recent exchange-wide, Nifty 50, Sensex 30, and market regime snapshot."""

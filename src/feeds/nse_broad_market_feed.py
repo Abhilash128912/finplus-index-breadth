@@ -27,6 +27,36 @@ logger = get_finplus_logger("NSEBroadMarketFeed")
 IST = datetime.timezone(datetime.timedelta(hours=5, minutes=30))
 
 
+class QuoteResult(tuple):
+    """
+    3-tuple (spot, change_pct, tick_age) with dictionary-like access (.get(), ['live_price'], etc.)
+    for backward compatibility with callers expecting either a tuple or a dict.
+    """
+    def __new__(cls, spot: Optional[float], change_pct: Optional[float], tick_age: float, raw_dict: Optional[Dict[str, Any]] = None):
+        return super().__new__(cls, (spot, change_pct, tick_age))
+
+    def __init__(self, spot: Optional[float], change_pct: Optional[float], tick_age: float, raw_dict: Optional[Dict[str, Any]] = None):
+        self.spot = spot
+        self.change_pct = change_pct
+        self.tick_age = tick_age
+        self.raw_dict = raw_dict or {}
+
+    def __bool__(self) -> bool:
+        return self[0] is not None
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key in ("live_price", "last_price", "spot", "last"):
+            return self.spot if self.spot is not None else default
+        if key in ("day_change_percentage", "percentChange", "change_pct"):
+            return self.change_pct if self.change_pct is not None else default
+        return self.raw_dict.get(key, default)
+
+    def __getitem__(self, item: Any) -> Any:
+        if isinstance(item, str):
+            return self.get(item)
+        return super().__getitem__(item)
+
+
 class NSEBroadMarketFeed:
     """Retrieves full-exchange advance/decline and turnover directly from NSE India."""
 
@@ -47,13 +77,23 @@ class NSEBroadMarketFeed:
         self._cached_nifty_chg: Optional[float] = None
         self._cached_nifty_chg_pct: Optional[float] = None
         self._last_nifty_time: float = 0.0
+        self._quote_cache: Dict[str, Dict[str, Any]] = {}
+        self._quote_time: Dict[str, float] = {}
+        self.last_errors: Dict[str, Optional[str]] = {
+            "nse_breadth": None,
+            "indstocks_quotes": None,
+            "vix": None,
+        }
 
-    def _fetch_indstocks_quote(self, scrip_code: str) -> Optional[Dict[str, Any]]:
+    def _fetch_indstocks_quote(self, scrip_code: str) -> QuoteResult:
         """
         Fetches live real-time index quote from INDstocks broker API.
         Used for Sensex (BIDX_40000006) and Nifty (NIDX_40000001).
-        Zero external/third-party dependencies.
+        Returns QuoteResult: (spot, change_pct, tick_age).
+        If tick is stale (>15s) or HTTP error: returns (None, None, age).
+        Never raises exceptions. Zero external/third-party dependencies.
         """
+        now = time.time()
         try:
             import os
             from pathlib import Path
@@ -83,41 +123,54 @@ class NSEBroadMarketFeed:
 
                 if resp.status_code == 200:
                     data = resp.json().get("data", {}).get(scrip_code, {})
-                    return data
+                    p = float(data.get("live_price") or 0.0)
+                    chg = float(data.get("day_change_percentage") or 0.0)
+                    if p > 0:
+                        self._quote_cache[scrip_code] = data
+                        self._quote_time[scrip_code] = now
+                        self.last_errors["indstocks_quotes"] = None
+                        return QuoteResult(round(p, 2), round(chg, 2), 0.0, raw_dict=data)
+                else:
+                    self.last_errors["indstocks_quotes"] = f"HTTP {resp.status_code}"
+            else:
+                self.last_errors["indstocks_quotes"] = "Missing INDstocks auth token"
         except Exception as e:
+            self.last_errors["indstocks_quotes"] = str(e)
             logger.debug("INDstocks quote fetch notice for %s: %s", scrip_code, e)
-        return None
 
-    def _fetch_sensex_quote(self) -> tuple[Optional[float], Optional[float], float]:
+        # Check cached tick if available
+        last_t = self._quote_time.get(scrip_code, 0.0)
+        age = round(now - last_t, 1) if last_t > 0 else 999.0
+        cached_data = self._quote_cache.get(scrip_code)
+
+        if cached_data and age <= 15.0:
+            p = float(cached_data.get("live_price") or 0.0)
+            chg = float(cached_data.get("day_change_percentage") or 0.0)
+            return QuoteResult(round(p, 2), round(chg, 2), age, raw_dict=cached_data)
+
+        # Stale (>15s) or HTTP error without valid fresh cache -> (None, None, age)
+        return QuoteResult(None, None, age, raw_dict=cached_data)
+
+    def _fetch_sensex_quote(self) -> QuoteResult:
         """
         Fetches real-time Sensex 30 spot and change percentage.
         PRIMARY & SOLE SOURCE: Official INDstocks (INDmoney) broker quote feed (BIDX_40000006).
-        Returns (spot, change_pct, tick_age). If missing or stale (>15s), spot is None.
-        Never invent a number.
+        Returns QuoteResult: (spot, change_pct, tick_age).
+        Never raises exceptions, never invents a number.
         """
-        now = time.time()
-        data = self._fetch_indstocks_quote("BIDX_40000006")
-        if data:
-            try:
-                p = float(data.get("live_price") or 0.0)
-                chg = float(data.get("day_change_percentage") or 0.0)
-                if p > 50000:
-                    self._cached_sensex_spot = round(p, 2)
-                    self._cached_sensex_chg_pct = round(chg, 2)
-                    self._last_sensex_time = now
-                    return self._cached_sensex_spot, self._cached_sensex_chg_pct, 0.0
-            except Exception:
-                pass
+        res = self._fetch_indstocks_quote("BIDX_40000006")
+        if res.spot and res.spot > 50000:
+            self._cached_sensex_spot = res.spot
+            self._cached_sensex_chg_pct = res.change_pct
+            self._last_sensex_time = time.time()
+            return QuoteResult(self._cached_sensex_spot, self._cached_sensex_chg_pct, res.tick_age, raw_dict=res.raw_dict)
 
-        # Return cached live tick if fresh (within 15 seconds)
         if self._cached_sensex_spot and self._cached_sensex_spot > 50000:
-            age = now - self._last_sensex_time
+            age = round(time.time() - self._last_sensex_time, 1)
             if age <= 15.0:
-                return self._cached_sensex_spot, self._cached_sensex_chg_pct, age
+                return QuoteResult(self._cached_sensex_spot, self._cached_sensex_chg_pct, age)
 
-        # Stale or missing -> return None (never invent a number)
-        age = (now - self._last_sensex_time) if self._last_sensex_time > 0 else 999.0
-        return None, None, age
+        return res
 
     def _prime_session(self) -> None:
         """Initializes tracking cookies with NSE."""
@@ -151,7 +204,11 @@ class NSEBroadMarketFeed:
             r_all = self.session.get(all_stocks_url, headers=self.HEADERS, timeout=8)
             if r_all.status_code == 200:
                 raw_all_stocks = r_all.json()
+                self.last_errors["nse_breadth"] = None
+            else:
+                self.last_errors["nse_breadth"] = f"HTTP {r_all.status_code}"
         except Exception as exc:
+            self.last_errors["nse_breadth"] = str(exc)
             logger.warning("Failed to fetch NSE all stocks breadth: %s", exc)
 
         # 2. Fetch Index Segments
@@ -273,12 +330,22 @@ class NSEBroadMarketFeed:
             n50_dec = int(nifty_50["declines"]) if nifty_50.get("declines") is not None else (n500_dec if n500_dec > 0 else None)
 
         # Parse India VIX
-        last_vix = india_vix_entry.get("last")
-        vix_val = round(float(last_vix), 2) if (last_vix is not None and float(last_vix) > 0) else None
-        var_vix = india_vix_entry.get("variation")
-        vix_chg = round(float(var_vix), 2) if (var_vix is not None and vix_val is not None) else None
-        pct_vix = india_vix_entry.get("percentChange")
-        vix_chg_pct = round(float(pct_vix), 2) if (pct_vix is not None and vix_val is not None) else None
+        if india_vix_entry:
+            last_vix = india_vix_entry.get("last")
+            vix_val = round(float(last_vix), 2) if (last_vix is not None and float(last_vix) > 0) else None
+            var_vix = india_vix_entry.get("variation")
+            vix_chg = round(float(var_vix), 2) if (var_vix is not None and vix_val is not None) else None
+            pct_vix = india_vix_entry.get("percentChange")
+            vix_chg_pct = round(float(pct_vix), 2) if (pct_vix is not None and vix_val is not None) else None
+            if vix_val is not None:
+                self.last_errors["vix"] = None
+            else:
+                self.last_errors["vix"] = "INDIA VIX quote unavailable"
+        else:
+            vix_val = None
+            vix_chg = None
+            vix_chg_pct = None
+            self.last_errors["vix"] = "INDIA VIX missing in NSE allIndices feed"
 
         if vix_val is None:
             vix_regime = "UNKNOWN"
@@ -415,6 +482,7 @@ class NSEBroadMarketFeed:
             "timestamp": datetime.datetime.now(tz=IST).isoformat(),
             "data_status": data_status,
             "tick_age": round(max_tick_age, 1) if max_tick_age < 900 else None,
+            "last_errors": dict(self.last_errors),
             "fetch_time": now_ts,
             "market_status": market_state.get("marketStatus", "Open"),
             "trade_date": market_state.get("tradeDate", ""),

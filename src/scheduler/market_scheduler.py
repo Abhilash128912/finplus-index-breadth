@@ -338,6 +338,70 @@ class MarketScheduler:
 
             await asyncio.sleep(self.poll_interval)
 
+    def get_regime_debug_info(self) -> Dict[str, Any]:
+        """Returns per-field debugging telemetry, tick ages, data status, and last source error messages (zero secrets)."""
+        bm = self.latest_broad_market or {}
+        now_ts = datetime.datetime.now(tz=IST).timestamp()
+        fetch_time = float(bm.get("fetch_time") or now_ts)
+        breadth_age = round(now_ts - fetch_time, 1) if fetch_time else 0.0
+
+        nifty_spot = bm.get("nifty_spot")
+        sensex_spot = bm.get("sensex_spot")
+        tick_age = bm.get("tick_age", breadth_age)
+        data_status = bm.get("data_status", "PARTIAL")
+
+        broad_data = bm.get("broad_market") or {}
+        vix_info = bm.get("vix") or {}
+        vix_val = vix_info.get("value")
+
+        last_errors = getattr(self.broad_feed, "last_errors", {
+            "nse_breadth": None,
+            "indstocks_quotes": None,
+            "vix": None,
+        })
+
+        last_n_t = getattr(self.broad_feed, "_last_nifty_time", 0.0)
+        last_s_t = getattr(self.broad_feed, "_last_sensex_time", 0.0)
+        nifty_age = round(now_ts - last_n_t, 1) if last_n_t > 0 else tick_age
+        sensex_age = round(now_ts - last_s_t, 1) if last_s_t > 0 else tick_age
+
+        return {
+            "timestamp": datetime.datetime.now(tz=IST).isoformat(),
+            "data_status": data_status,
+            "regime": self.latest_regime_result.get("regime", "UNKNOWN"),
+            "fields": {
+                "nifty_spot": {
+                    "value": nifty_spot,
+                    "source": "INDSTOCKS/NSE" if nifty_spot else "NONE",
+                    "tick_age": nifty_age if nifty_spot else None,
+                    "data_status": "OK" if (nifty_spot and nifty_age <= 15.0) else ("STALE" if (nifty_age and nifty_age > 15.0) else "PARTIAL"),
+                },
+                "sensex_spot": {
+                    "value": sensex_spot,
+                    "source": "INDSTOCKS" if sensex_spot else "NONE",
+                    "tick_age": sensex_age if sensex_spot else None,
+                    "data_status": "OK" if (sensex_spot and sensex_age <= 15.0) else ("STALE" if (sensex_age and sensex_age > 15.0) else "PARTIAL"),
+                },
+                "breadth": {
+                    "value": broad_data if broad_data else None,
+                    "source": "NSE",
+                    "tick_age": breadth_age,
+                    "data_status": "OK" if (broad_data.get("advances") is not None and breadth_age <= 15.0) else ("STALE" if breadth_age > 15.0 else "PARTIAL"),
+                },
+                "india_vix": {
+                    "value": vix_val,
+                    "source": "NSE",
+                    "tick_age": breadth_age if vix_val is not None else None,
+                    "data_status": "OK" if vix_val is not None else "PARTIAL",
+                },
+            },
+            "last_errors": {
+                "nse_breadth": last_errors.get("nse_breadth"),
+                "indstocks_quotes": last_errors.get("indstocks_quotes"),
+                "vix": last_errors.get("vix"),
+            },
+        }
+
     def stop(self) -> None:
         """Stops the scheduler loop."""
         self._running = False
