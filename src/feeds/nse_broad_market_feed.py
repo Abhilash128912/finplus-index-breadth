@@ -102,14 +102,15 @@ class NSEBroadMarketFeed:
             if root_dir not in sys.path:
                 sys.path.insert(0, root_dir)
             ac = None
-            token = os.getenv("INDMONEY_ACCESS_TOKEN") or os.getenv("INDSTOCKS_TOKEN")
+            token = None
             try:
                 from finplus_core.auth import INDMoneyAuthClient
                 ac = INDMoneyAuthClient()
-                if not token or not ac.is_token_valid():
-                    token = ac.get_valid_token()
+                token = ac.get_valid_token()
             except Exception as auth_err:
                 logger.debug("Auth client init notice: %s", auth_err)
+            if not token:
+                token = os.getenv("INDMONEY_ACCESS_TOKEN") or os.getenv("INDSTOCKS_TOKEN")
 
             if token:
                 headers = {"Authorization": token, "Accept": "application/json"}
