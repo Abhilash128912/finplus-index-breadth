@@ -398,7 +398,10 @@ class MarketRegimeEngine:
         hour = now.hour
         minute = now.minute
         is_weekday = now.weekday() < 5
-        is_market_open = is_weekday and ((hour == 9 and minute >= 15) or (10 <= hour < 15) or (hour == 15 and minute <= 30))
+        if broad_market and "is_market_open" in broad_market:
+            is_market_open = bool(broad_market["is_market_open"])
+        else:
+            is_market_open = is_weekday and ((hour == 9 and minute >= 15) or (10 <= hour < 15) or (hour == 15 and minute <= 30))
 
         if not is_market_open or raw_data_status == "MARKET_CLOSED":
             is_stale = False

@@ -153,19 +153,60 @@ async def admin_set_token(request: Request) -> Dict[str, Any]:
         if not new_token or len(new_token) < 20:
             raise HTTPException(status_code=400, detail="Missing or invalid token string")
 
-        if hasattr(scheduler, "feed") and hasattr(scheduler.feed, "auth_client") and scheduler.feed.auth_client:
+        if hasattr(scheduler, "feed"):
+            if not getattr(scheduler.feed, "auth_client", None):
+                from finplus_core.auth import INDMoneyAuthClient
+                scheduler.feed.auth_client = INDMoneyAuthClient(access_token=new_token, auth_role="client")
             auth_c = scheduler.feed.auth_client
             auth_c.access_token = new_token
             auth_c._save_token_to_file(new_token)
             os.environ["INDMONEY_ACCESS_TOKEN"] = new_token
             ver = await asyncio.to_thread(auth_c.verify_connection)
             return {"status": "SUCCESS", "token_length": len(new_token), "verification": ver}
-        return JSONResponse(status_code=500, content={"status": "ERROR", "message": "auth_client not configured on feed"})
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": "feed not configured on scheduler"})
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error during breadth admin set-token: {e}")
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
+@app.get("/api/auth/token")
+async def get_active_auth_token(request: Request) -> Dict[str, Any]:
+    """
+    Returns the active INDstocks broker session token held by this client service.
+    Protected by Bearer ADMIN_TOKEN.
+    """
+    admin_token = os.getenv("ADMIN_TOKEN") or "finplus-admin-secret-2026"
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized: Missing Bearer token")
+
+    token = auth_header.split(" ", 1)[1].strip()
+    if token != admin_token:
+        raise HTTPException(status_code=403, detail="Forbidden: Invalid ADMIN_TOKEN")
+
+    held_token = None
+    exp_iso = None
+    if hasattr(scheduler, "feed") and getattr(scheduler.feed, "auth_client", None):
+        auth_c = scheduler.feed.auth_client
+        held_token = auth_c.access_token
+        if held_token:
+            exp_dt = auth_c.get_token_expiration(held_token)
+            exp_iso = exp_dt.isoformat() if exp_dt else None
+
+    if not held_token:
+        held_token = os.getenv("INDMONEY_ACCESS_TOKEN") or os.getenv("INDSTOCKS_TOKEN")
+
+    if not held_token:
+        raise HTTPException(status_code=503, detail="No active broker token available on client")
+
+    return {
+        "status": "SUCCESS",
+        "token": held_token,
+        "expiry": exp_iso,
+        "role": "client"
+    }
 
 
 @app.api_route("/api/regime", methods=["GET", "HEAD"])

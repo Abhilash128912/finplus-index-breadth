@@ -88,6 +88,7 @@ def test_regime_unknown_when_nifty_spot_is_none(tmp_path):
     mgr.current_regime = "UPTREND"
 
     broad_market = {
+        "is_market_open": True,
         "nifty_spot": None,
         "sensex_spot": 80100.0,
         "tick_age": 1.5,
@@ -115,6 +116,7 @@ def test_regime_unknown_when_sensex_spot_is_none(tmp_path):
     mgr.current_regime = "STRONG_UPTREND"
 
     broad_market = {
+        "is_market_open": True,
         "nifty_spot": 25100.0,
         "sensex_spot": None,
         "tick_age": 2.0,
@@ -142,7 +144,7 @@ def test_regime_unknown_when_breadth_data_is_none(tmp_path):
     nifty_breadth = {"status": "NO_DATA"}
     sensex_breadth = {"status": "NO_DATA"}
 
-    res = MarketRegimeEngine.evaluate_regime(nifty_breadth, sensex_breadth, broad_market=None)
+    res = MarketRegimeEngine.evaluate_regime(nifty_breadth, sensex_breadth, broad_market={"is_market_open": True, "broad_market": None})
 
     assert res["regime"] == "UNKNOWN"
     assert res["trend"]["code"] == "UNKNOWN"
@@ -158,6 +160,7 @@ def test_regime_unknown_when_tick_older_than_15s(tmp_path):
     mgr.current_regime = "UPTREND"
 
     broad_market = {
+        "is_market_open": True,
         "nifty_spot": 25200.0,
         "sensex_spot": 82000.0,
         "tick_age": 18.4,
@@ -186,6 +189,7 @@ def test_india_vix_none_scores_cleanly_partial_status(tmp_path):
     mgr = MarketRegimeEngine.reset_state_manager(state_file=state_file)
 
     broad_market = {
+        "is_market_open": True,
         "nifty_spot": 25250.0,
         "sensex_spot": 82100.0,
         "tick_age": 1.2,
