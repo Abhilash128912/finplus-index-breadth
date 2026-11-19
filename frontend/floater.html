@@ -85,7 +85,10 @@
   <script>
     async function update() {
       try {
-        const res = await fetch('/api/breadth');
+        const res = await fetch('/api/breadth?_t=' + Date.now(), {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+        });
         const data = await res.json();
         const regime = data.market_regime || {};
         const trend = regime.trend || {};

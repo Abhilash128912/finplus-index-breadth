@@ -569,7 +569,10 @@
 
     async function pollLiveBreadth() {
       try {
-        const res = await fetch('/api/breadth');
+        const res = await fetch('/api/breadth?_t=' + Date.now(), {
+          cache: 'no-store',
+          headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+        });
         if (res.ok) {
           const data = await res.json();
           updateUI(data);
@@ -1209,7 +1212,10 @@
     }
 
     // Immediate REST snapshot for instant UI paint, followed by live WebSocket streaming
-    fetch('/api/breadth')
+    fetch('/api/breadth?_t=' + Date.now(), {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+    })
       .then(res => res.json())
       .then(snapshot => {
         if (snapshot) updateUI(snapshot);

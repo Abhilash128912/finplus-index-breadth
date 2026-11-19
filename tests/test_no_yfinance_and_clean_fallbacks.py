@@ -284,7 +284,7 @@ def test_fetch_indstocks_quote_stale_and_http_error(monkeypatch):
 
 
 def test_regime_debug_endpoint():
-    """Verify /api/regime/debug returns per-field details and last source errors with zero secrets."""
+    """Verify /api/regime/debug returns per-field details, per-source counters, and last source errors with zero secrets."""
     from fastapi.testclient import TestClient
     from finplus_index_breadth.api.server import app
 
@@ -296,6 +296,19 @@ def test_regime_debug_endpoint():
     assert "data_status" in data
     assert "fields" in data
     assert "last_errors" in data
+    assert "sources" in data
+    assert "background_thread_alive" in data
+
+    # Check sources
+    for src in ["indstocks_sensex", "indstocks_nifty", "nse_breadth", "vix"]:
+        assert src in data["sources"], f"Missing source {src}"
+        s_obj = data["sources"][src]
+        assert "last_success_ts" in s_obj
+        assert "last_error" in s_obj
+        assert "consecutive_failures" in s_obj
+        assert "token_age_seconds" in s_obj
+        assert "exchange_ts" in s_obj
+        assert "fetched_at" in s_obj
 
     fields = data["fields"]
     for req_field in ["nifty_spot", "sensex_spot", "breadth", "india_vix"]:
@@ -309,4 +322,90 @@ def test_regime_debug_endpoint():
     last_errors = data["last_errors"]
     for src in ["nse_breadth", "indstocks_quotes", "vix"]:
         assert src in last_errors, f"Missing source error key {src}"
+
+
+def test_stale_exchange_timestamp_marks_stale(monkeypatch):
+    """
+    Requirement 6: If exchange timestamp is older than 15s during market hours, mark STALE.
+    """
+    import time
+    from email.utils import formatdate
+    import requests
+    from finplus_index_breadth.feeds.nse_broad_market_feed import NSEBroadMarketFeed
+    import finplus_index_breadth.feeds.nse_broad_market_feed as feed_module
+
+    feed = NSEBroadMarketFeed()
+
+    # Mock market hours = OPEN
+    monkeypatch.setattr(feed_module, "is_regular_nse_market_open", lambda *args, **kwargs: True)
+
+    # 25 seconds ago
+    old_time = time.time() - 25.0
+    old_date_hdr = formatdate(old_time, usegmt=True)
+
+    class MockOldResp:
+        status_code = 200
+        headers = {"Date": old_date_hdr}
+        def json(self):
+            return {"status": "success", "data": {"BIDX_40000006": {"live_price": 82100.0, "day_change_percentage": 0.2}}}
+
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: MockOldResp())
+
+    res = feed._fetch_indstocks_quote("BIDX_40000006")
+    assert res.data_status == "STALE"
+    assert res.spot is None  # Stale tick returns None spot
+    assert res.tick_age >= 24.0
+
+
+def test_error_returns_none_with_no_cached_value(monkeypatch):
+    """
+    Requirement 6: Never return a cached price on error. On any failure return None and set last_error.
+    """
+    import requests
+    from finplus_index_breadth.feeds.nse_broad_market_feed import NSEBroadMarketFeed
+
+    feed = NSEBroadMarketFeed()
+
+    # Seed previous successful quote
+    feed.last_success_ts["indstocks_sensex"] = 1000.0
+
+    class MockErrResp:
+        status_code = 500
+        headers = {}
+        text = "Internal Server Error"
+        def json(self):
+            return {}
+
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: MockErrResp())
+
+    res = feed._fetch_indstocks_quote("BIDX_40000006")
+    assert res.spot is None
+    assert res.change_pct is None
+    assert feed.last_errors["indstocks_sensex"] == "HTTP 500"
+    assert feed.consecutive_failures["indstocks_sensex"] >= 1
+
+
+def test_outside_market_hours_marks_market_closed(monkeypatch):
+    """
+    Requirement 6: Outside market hours, mark MARKET_CLOSED, not STALE.
+    """
+    import requests
+    from finplus_index_breadth.feeds.nse_broad_market_feed import NSEBroadMarketFeed
+    import finplus_index_breadth.feeds.nse_broad_market_feed as feed_module
+
+    feed = NSEBroadMarketFeed()
+
+    # Mock market hours = CLOSED
+    monkeypatch.setattr(feed_module, "is_regular_nse_market_open", lambda *args, **kwargs: False)
+
+    class MockOkResp:
+        status_code = 200
+        headers = {}
+        def json(self):
+            return {"status": "success", "data": {"BIDX_40000006": {"live_price": 82100.0, "day_change_percentage": 0.2}}}
+
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: MockOkResp())
+
+    res = feed._fetch_indstocks_quote("BIDX_40000006")
+    assert res.data_status == "MARKET_CLOSED"
 

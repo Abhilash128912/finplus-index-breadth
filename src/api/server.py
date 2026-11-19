@@ -34,7 +34,7 @@ except ImportError:
 
 from typing import Any, Dict, List
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -62,6 +62,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def add_cache_control_headers(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
@@ -88,7 +97,7 @@ async def startup_event() -> None:
     """Launches the background market poller upon server boot."""
     logger.info("Booting FinPlus+ Index Breadth Web Gateway...")
     # Launch background loop (executes first refresh asynchronously via worker thread)
-    asyncio.create_task(scheduler.run_loop())
+    scheduler._task = asyncio.create_task(scheduler.run_loop())
 
 
 @app.on_event("shutdown")
@@ -112,6 +121,7 @@ async def serve_cockpit() -> FileResponse:
 @app.api_route("/api/status", methods=["GET", "HEAD"])
 async def get_health_status() -> Dict[str, Any]:
     """Health check endpoint and Render keep-alive ping."""
+    scheduler.ensure_scheduler_running()
     return {
         "status": "HEALTHY",
         "service": "FinPlus+ Index Breadth & BTST Engine",
@@ -124,6 +134,7 @@ async def get_health_status() -> Dict[str, Any]:
 @app.api_route("/api/regime", methods=["GET", "HEAD"])
 async def get_market_regime() -> Dict[str, Any]:
     """Returns the intraday market trend regime and equity/option trading directives."""
+    scheduler.ensure_scheduler_running()
     if not scheduler.latest_regime_result:
         scheduler.refresh_breadth()
     return scheduler.latest_regime_result
@@ -132,6 +143,7 @@ async def get_market_regime() -> Dict[str, Any]:
 @app.api_route("/api/regime/debug", methods=["GET", "HEAD"])
 async def get_regime_debug() -> Dict[str, Any]:
     """Returns field-level debugging telemetry, tick ages, sources, and source errors (zero secrets)."""
+    scheduler.ensure_scheduler_running()
     if not scheduler.latest_regime_result:
         scheduler.refresh_breadth()
     return scheduler.get_regime_debug_info()
@@ -140,6 +152,7 @@ async def get_regime_debug() -> Dict[str, Any]:
 @app.get("/api/breadth")
 async def get_breadth_data() -> Dict[str, Any]:
     """Returns the most recent exchange-wide, Nifty 50, Sensex 30, and market regime snapshot."""
+    scheduler.ensure_scheduler_running()
     if not scheduler.latest_nifty_breadth:
         scheduler.refresh_breadth()
     return {

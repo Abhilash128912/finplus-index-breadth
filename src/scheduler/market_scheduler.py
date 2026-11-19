@@ -49,6 +49,7 @@ class MarketScheduler:
         self.latest_btst_result: Dict[str, Any] = {}
 
         self._running = False
+        self._task: Optional[asyncio.Task] = None
         self._last_pulse_slot: Optional[str] = None
         self._last_btst_slot: Optional[str] = None
         self._last_regime_label: Optional[str] = None
@@ -338,10 +339,22 @@ class MarketScheduler:
 
             await asyncio.sleep(self.poll_interval)
 
+    def ensure_scheduler_running(self) -> None:
+        """Restarts background scheduler loop if dead, unstarted, or completed."""
+        if self._task is None or self._task.done():
+            logger.info("Restarting MarketScheduler background loop after sleep/wake...")
+            self._running = True
+            try:
+                loop = asyncio.get_running_loop()
+                self._task = loop.create_task(self.run_loop())
+            except RuntimeError:
+                pass
+
     def get_regime_debug_info(self) -> Dict[str, Any]:
         """Returns per-field debugging telemetry, tick ages, data status, and last source error messages (zero secrets)."""
         bm = self.latest_broad_market or {}
-        now_ts = datetime.datetime.now(tz=IST).timestamp()
+        now_dt = datetime.datetime.now(tz=IST)
+        now_ts = now_dt.timestamp()
         fetch_time = float(bm.get("fetch_time") or now_ts)
         breadth_age = round(now_ts - fetch_time, 1) if fetch_time else 0.0
 
@@ -359,45 +372,92 @@ class MarketScheduler:
             "indstocks_quotes": None,
             "vix": None,
         })
+        last_success_ts = getattr(self.broad_feed, "last_success_ts", {})
+        consecutive_failures = getattr(self.broad_feed, "consecutive_failures", {})
+        exchange_ts = getattr(self.broad_feed, "exchange_ts", {})
+        fetched_at = getattr(self.broad_feed, "fetched_at", {})
 
         last_n_t = getattr(self.broad_feed, "_last_nifty_time", 0.0)
         last_s_t = getattr(self.broad_feed, "_last_sensex_time", 0.0)
         nifty_age = round(now_ts - last_n_t, 1) if last_n_t > 0 else tick_age
         sensex_age = round(now_ts - last_s_t, 1) if last_s_t > 0 else tick_age
 
+        ac = getattr(self.broad_feed, "auth_client", None)
+        token_gen_ts = getattr(ac, "token_generated_at", None) if ac else None
+        token_age_s = round(now_ts - token_gen_ts, 1) if token_gen_ts else None
+
+        bg_alive = bool(self._running and self._task is not None and not self._task.done())
+
+        from src.feeds.nse_broad_market_feed import is_regular_nse_market_open
+        is_market_open = is_regular_nse_market_open(now_dt)
+
+        sources = {
+            "indstocks_sensex": {
+                "value": sensex_spot,
+                "source": "INDSTOCKS",
+                "tick_age": sensex_age if sensex_spot else None,
+                "data_status": "MARKET_CLOSED" if not is_market_open else ("OK" if (sensex_spot and sensex_age <= 15.0) else "STALE"),
+                "last_success_ts": last_success_ts.get("indstocks_sensex"),
+                "last_error": last_errors.get("indstocks_sensex"),
+                "consecutive_failures": consecutive_failures.get("indstocks_sensex", 0),
+                "token_age_seconds": token_age_s,
+                "exchange_ts": exchange_ts.get("indstocks_sensex"),
+                "fetched_at": fetched_at.get("indstocks_sensex"),
+            },
+            "indstocks_nifty": {
+                "value": nifty_spot,
+                "source": "INDSTOCKS/NSE",
+                "tick_age": nifty_age if nifty_spot else None,
+                "data_status": "MARKET_CLOSED" if not is_market_open else ("OK" if (nifty_spot and nifty_age <= 15.0) else "STALE"),
+                "last_success_ts": last_success_ts.get("indstocks_nifty"),
+                "last_error": last_errors.get("indstocks_nifty"),
+                "consecutive_failures": consecutive_failures.get("indstocks_nifty", 0),
+                "token_age_seconds": token_age_s,
+                "exchange_ts": exchange_ts.get("indstocks_nifty"),
+                "fetched_at": fetched_at.get("indstocks_nifty"),
+            },
+            "nse_breadth": {
+                "value": broad_data if broad_data else None,
+                "source": "NSE",
+                "tick_age": breadth_age,
+                "data_status": "MARKET_CLOSED" if not is_market_open else ("OK" if (broad_data.get("advances") is not None and breadth_age <= 15.0) else "STALE"),
+                "last_success_ts": last_success_ts.get("nse_breadth"),
+                "last_error": last_errors.get("nse_breadth"),
+                "consecutive_failures": consecutive_failures.get("nse_breadth", 0),
+                "token_age_seconds": None,
+                "exchange_ts": exchange_ts.get("nse_breadth"),
+                "fetched_at": fetched_at.get("nse_breadth"),
+            },
+            "vix": {
+                "value": vix_val,
+                "source": "NSE",
+                "tick_age": vix_info.get("tick_age"),
+                "data_status": "MARKET_CLOSED" if not is_market_open else ("OK" if vix_val is not None else "PARTIAL"),
+                "last_success_ts": last_success_ts.get("vix"),
+                "last_error": last_errors.get("vix"),
+                "consecutive_failures": consecutive_failures.get("vix", 0),
+                "token_age_seconds": token_age_s,
+                "exchange_ts": exchange_ts.get("vix"),
+                "fetched_at": fetched_at.get("vix"),
+            },
+        }
+
         return {
-            "timestamp": datetime.datetime.now(tz=IST).isoformat(),
+            "timestamp": now_dt.isoformat(),
             "data_status": data_status,
             "regime": self.latest_regime_result.get("regime", "UNKNOWN"),
+            "background_thread_alive": bg_alive,
+            "token_age_seconds": token_age_s,
+            "sources": sources,
             "fields": {
-                "nifty_spot": {
-                    "value": nifty_spot,
-                    "source": "INDSTOCKS/NSE" if nifty_spot else "NONE",
-                    "tick_age": nifty_age if nifty_spot else None,
-                    "data_status": "OK" if (nifty_spot and nifty_age <= 15.0) else ("STALE" if (nifty_age and nifty_age > 15.0) else "PARTIAL"),
-                },
-                "sensex_spot": {
-                    "value": sensex_spot,
-                    "source": "INDSTOCKS" if sensex_spot else "NONE",
-                    "tick_age": sensex_age if sensex_spot else None,
-                    "data_status": "OK" if (sensex_spot and sensex_age <= 15.0) else ("STALE" if (sensex_age and sensex_age > 15.0) else "PARTIAL"),
-                },
-                "breadth": {
-                    "value": broad_data if broad_data else None,
-                    "source": "NSE",
-                    "tick_age": breadth_age,
-                    "data_status": "OK" if (broad_data.get("advances") is not None and breadth_age <= 15.0) else ("STALE" if breadth_age > 15.0 else "PARTIAL"),
-                },
-                "india_vix": {
-                    "value": vix_val,
-                    "source": "NSE",
-                    "tick_age": breadth_age if vix_val is not None else None,
-                    "data_status": "OK" if vix_val is not None else "PARTIAL",
-                },
+                "nifty_spot": sources["indstocks_nifty"],
+                "sensex_spot": sources["indstocks_sensex"],
+                "breadth": sources["nse_breadth"],
+                "india_vix": sources["vix"],
             },
             "last_errors": {
                 "nse_breadth": last_errors.get("nse_breadth"),
-                "indstocks_quotes": last_errors.get("indstocks_quotes"),
+                "indstocks_quotes": last_errors.get("indstocks_quotes") or last_errors.get("indstocks_sensex"),
                 "vix": last_errors.get("vix"),
             },
         }

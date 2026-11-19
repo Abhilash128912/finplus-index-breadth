@@ -32,14 +32,35 @@ class QuoteResult(tuple):
     3-tuple (spot, change_pct, tick_age) with dictionary-like access (.get(), ['live_price'], etc.)
     for backward compatibility with callers expecting either a tuple or a dict.
     """
-    def __new__(cls, spot: Optional[float], change_pct: Optional[float], tick_age: float, raw_dict: Optional[Dict[str, Any]] = None):
+    def __new__(
+        cls,
+        spot: Optional[float],
+        change_pct: Optional[float],
+        tick_age: float,
+        raw_dict: Optional[Dict[str, Any]] = None,
+        data_status: str = "OK",
+        exchange_ts: Optional[float] = None,
+        fetched_at: Optional[float] = None,
+    ):
         return super().__new__(cls, (spot, change_pct, tick_age))
 
-    def __init__(self, spot: Optional[float], change_pct: Optional[float], tick_age: float, raw_dict: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        spot: Optional[float],
+        change_pct: Optional[float],
+        tick_age: float,
+        raw_dict: Optional[Dict[str, Any]] = None,
+        data_status: str = "OK",
+        exchange_ts: Optional[float] = None,
+        fetched_at: Optional[float] = None,
+    ):
         self.spot = spot
         self.change_pct = change_pct
         self.tick_age = tick_age
         self.raw_dict = raw_dict or {}
+        self.data_status = data_status
+        self.exchange_ts = exchange_ts
+        self.fetched_at = fetched_at
 
     def __bool__(self) -> bool:
         return self[0] is not None
@@ -49,12 +70,28 @@ class QuoteResult(tuple):
             return self.spot if self.spot is not None else default
         if key in ("day_change_percentage", "percentChange", "change_pct"):
             return self.change_pct if self.change_pct is not None else default
+        if key == "data_status":
+            return self.data_status
+        if key == "exchange_ts":
+            return self.exchange_ts
+        if key == "fetched_at":
+            return self.fetched_at
         return self.raw_dict.get(key, default)
 
     def __getitem__(self, item: Any) -> Any:
         if isinstance(item, str):
             return self.get(item)
         return super().__getitem__(item)
+
+
+def is_regular_nse_market_open(now_dt: Optional[datetime.datetime] = None) -> bool:
+    """Checks whether IST time is within regular NSE Equity Hours (09:15 - 15:30 IST, Mon-Fri)."""
+    now = now_dt or datetime.datetime.now(tz=IST)
+    if now.weekday() >= 5:
+        return False
+    h = now.hour
+    m = now.minute
+    return (h == 9 and m >= 15) or (10 <= h < 15) or (h == 15 and m <= 30)
 
 
 class NSEBroadMarketFeed:
@@ -79,9 +116,36 @@ class NSEBroadMarketFeed:
         self._last_nifty_time: float = 0.0
         self._quote_cache: Dict[str, Dict[str, Any]] = {}
         self._quote_time: Dict[str, float] = {}
+        self.auth_client = None
         self.last_errors: Dict[str, Optional[str]] = {
+            "indstocks_sensex": None,
+            "indstocks_nifty": None,
             "nse_breadth": None,
+            "vix": None,
             "indstocks_quotes": None,
+        }
+        self.last_success_ts: Dict[str, Optional[float]] = {
+            "indstocks_sensex": None,
+            "indstocks_nifty": None,
+            "nse_breadth": None,
+            "vix": None,
+        }
+        self.consecutive_failures: Dict[str, int] = {
+            "indstocks_sensex": 0,
+            "indstocks_nifty": 0,
+            "nse_breadth": 0,
+            "vix": 0,
+        }
+        self.exchange_ts: Dict[str, Optional[float]] = {
+            "indstocks_sensex": None,
+            "indstocks_nifty": None,
+            "nse_breadth": None,
+            "vix": None,
+        }
+        self.fetched_at: Dict[str, Optional[float]] = {
+            "indstocks_sensex": None,
+            "indstocks_nifty": None,
+            "nse_breadth": None,
             "vix": None,
         }
 
@@ -90,10 +154,18 @@ class NSEBroadMarketFeed:
         Fetches live real-time index quote from INDstocks broker API.
         Used for Sensex (BIDX_40000006) and Nifty (NIDX_40000001).
         Returns QuoteResult: (spot, change_pct, tick_age).
-        If tick is stale (>15s) or HTTP error: returns (None, None, age).
-        Never raises exceptions. Zero external/third-party dependencies.
+        - Tick age comes from the exchange/quote timestamp in INDstocks response.
+        - Also stores fetched_at separately.
+        - If exchange timestamp is older than 15s during market hours, marked STALE.
+        - Outside market hours (9:15-15:30 IST, Mon-Fri), marked MARKET_CLOSED, not STALE.
+        - Never returns a cached price on error: on any failure returns (None, None, tick_age) and sets last_error.
         """
-        now = time.time()
+        from email.utils import parsedate_to_datetime
+        fetched_at = time.time()
+        is_market_open = is_regular_nse_market_open()
+        src_key = "indstocks_sensex" if "40000006" in scrip_code else ("indstocks_nifty" if "40000001" in scrip_code else scrip_code)
+        err_msg = None
+
         try:
             import os
             from pathlib import Path
@@ -101,76 +173,101 @@ class NSEBroadMarketFeed:
             root_dir = str(Path(__file__).resolve().parent.parent.parent)
             if root_dir not in sys.path:
                 sys.path.insert(0, root_dir)
-            ac = None
-            token = None
-            try:
-                from finplus_core.auth import INDMoneyAuthClient
-                ac = INDMoneyAuthClient()
-                token = ac.get_valid_token()
-            except Exception as auth_err:
-                logger.debug("Auth client init notice: %s", auth_err)
-            if not token:
-                token = os.getenv("INDMONEY_ACCESS_TOKEN") or os.getenv("INDSTOCKS_TOKEN")
+            if self.auth_client is None:
+                try:
+                    from finplus_core.auth import INDMoneyAuthClient
+                    self.auth_client = INDMoneyAuthClient()
+                except Exception as auth_err:
+                    logger.debug("Auth client init notice: %s", auth_err)
+
+            token = self.auth_client.get_valid_token() if self.auth_client else (
+                os.getenv("INDMONEY_ACCESS_TOKEN") or os.getenv("INDSTOCKS_TOKEN")
+            )
 
             if token:
                 headers = {"Authorization": token, "Accept": "application/json"}
                 url = f"https://api.indstocks.com/market/quotes/full?scrip-codes={scrip_code}"
                 resp = requests.get(url, headers=headers, timeout=2.5)
-                if resp.status_code in (401, 403) and ac:
-                    token = ac.force_refresh_token()
+                if resp.status_code in (401, 403) and self.auth_client:
+                    token = self.auth_client.force_refresh_token()
                     if token:
                         headers["Authorization"] = token
                         resp = requests.get(url, headers=headers, timeout=2.5)
 
                 if resp.status_code == 200:
-                    data = resp.json().get("data", {}).get(scrip_code, {})
+                    payload = resp.json()
+                    data = payload.get("data", {}).get(scrip_code, {})
                     p = float(data.get("live_price") or 0.0)
                     chg = float(data.get("day_change_percentage") or 0.0)
                     if p > 0:
-                        self._quote_cache[scrip_code] = data
-                        self._quote_time[scrip_code] = now
+                        # Extract exchange timestamp from response
+                        exchange_ts = None
+                        raw_ts = data.get("timestamp") or data.get("last_traded_time") or data.get("ltt") or data.get("trade_time")
+                        if raw_ts:
+                            try:
+                                raw_flt = float(raw_ts)
+                                exchange_ts = raw_flt / 1000.0 if raw_flt > 1e11 else raw_flt
+                            except Exception:
+                                pass
+                        if exchange_ts is None:
+                            date_hdr = resp.headers.get("Date")
+                            if date_hdr:
+                                try:
+                                    exchange_ts = parsedate_to_datetime(date_hdr).timestamp()
+                                except Exception:
+                                    exchange_ts = fetched_at
+                            else:
+                                exchange_ts = fetched_at
+
+                        tick_age = max(0.0, round(fetched_at - exchange_ts, 1))
+
+                        if not is_market_open:
+                            data_status = "MARKET_CLOSED"
+                        elif tick_age > 15.0:
+                            data_status = "STALE"
+                        else:
+                            data_status = "OK"
+
+                        # Update telemetry counters
+                        self.last_success_ts[src_key] = fetched_at
+                        self.last_errors[src_key] = None
                         self.last_errors["indstocks_quotes"] = None
-                        return QuoteResult(round(p, 2), round(chg, 2), 0.0, raw_dict=data)
+                        self.consecutive_failures[src_key] = 0
+                        self.exchange_ts[src_key] = exchange_ts
+                        self.fetched_at[src_key] = fetched_at
+
+                        if data_status == "STALE":
+                            return QuoteResult(None, None, tick_age, raw_dict=data, data_status="STALE", exchange_ts=exchange_ts, fetched_at=fetched_at)
+
+                        return QuoteResult(round(p, 2), round(chg, 2), tick_age, raw_dict=data, data_status=data_status, exchange_ts=exchange_ts, fetched_at=fetched_at)
+                    else:
+                        err_msg = f"Zero/empty live_price for {scrip_code}"
                 else:
-                    self.last_errors["indstocks_quotes"] = f"HTTP {resp.status_code}"
+                    err_msg = f"HTTP {resp.status_code}"
             else:
-                self.last_errors["indstocks_quotes"] = "Missing INDstocks auth token"
+                err_msg = "Missing INDstocks auth token"
         except Exception as e:
-            self.last_errors["indstocks_quotes"] = str(e)
+            err_msg = str(e)
             logger.debug("INDstocks quote fetch notice for %s: %s", scrip_code, e)
 
-        # Check cached tick if available
-        last_t = self._quote_time.get(scrip_code, 0.0)
-        age = round(now - last_t, 1) if last_t > 0 else 999.0
-        cached_data = self._quote_cache.get(scrip_code)
-
-        if cached_data and age <= 15.0:
-            p = float(cached_data.get("live_price") or 0.0)
-            chg = float(cached_data.get("day_change_percentage") or 0.0)
-            return QuoteResult(round(p, 2), round(chg, 2), age, raw_dict=cached_data)
-
-        # Stale (>15s) or HTTP error without valid fresh cache -> (None, None, age)
-        return QuoteResult(None, None, age, raw_dict=cached_data)
+        # On any failure: Record error and return None (ZERO cached fallback)
+        self.consecutive_failures[src_key] = self.consecutive_failures.get(src_key, 0) + 1
+        self.last_errors[src_key] = err_msg
+        self.last_errors["indstocks_quotes"] = err_msg
+        self.fetched_at[src_key] = fetched_at
+        status = "MARKET_CLOSED" if not is_market_open else "ERROR"
+        return QuoteResult(None, None, 999.0, raw_dict=None, data_status=status, exchange_ts=None, fetched_at=fetched_at)
 
     def _fetch_sensex_quote(self) -> QuoteResult:
         """
         Fetches real-time Sensex 30 spot and change percentage.
         PRIMARY & SOLE SOURCE: Official INDstocks (INDmoney) broker quote feed (BIDX_40000006).
         Returns QuoteResult: (spot, change_pct, tick_age).
-        Never raises exceptions, never invents a number.
+        Never returns a cached price on error. On failure returns (None, None, age).
         """
         res = self._fetch_indstocks_quote("BIDX_40000006")
         if res.spot and res.spot > 50000:
-            self._cached_sensex_spot = res.spot
-            self._cached_sensex_chg_pct = res.change_pct
-            self._last_sensex_time = time.time()
-            return QuoteResult(self._cached_sensex_spot, self._cached_sensex_chg_pct, res.tick_age, raw_dict=res.raw_dict)
-
-        if self._cached_sensex_spot and self._cached_sensex_spot > 50000:
-            age = round(time.time() - self._last_sensex_time, 1)
-            if age <= 15.0:
-                return QuoteResult(self._cached_sensex_spot, self._cached_sensex_chg_pct, age)
-
+            self._last_sensex_time = res.fetched_at or time.time()
         return res
 
     def _prime_session(self) -> None:
@@ -311,9 +408,17 @@ class NSEBroadMarketFeed:
         if full_adv is not None and full_dec is not None:
             full_total = full_adv + full_dec + (full_unc or 0)
             full_adr = round(full_adv / max(full_dec, 1), 2)
+            self.last_success_ts["nse_breadth"] = now_ts
+            self.last_errors["nse_breadth"] = None
+            self.consecutive_failures["nse_breadth"] = 0
+            self.exchange_ts["nse_breadth"] = now_ts
+            self.fetched_at["nse_breadth"] = now_ts
         else:
             full_total = None
             full_adr = None
+            self.consecutive_failures["nse_breadth"] = self.consecutive_failures.get("nse_breadth", 0) + 1
+            self.last_errors["nse_breadth"] = "NSE broad market data missing or failed"
+            self.fetched_at["nse_breadth"] = now_ts
 
         # Non-zero segment fallback for Cloud/Datacenter environments
         if n500_adv == 0 and n500_dec == 0 and full_adv is not None and full_adv > 0:
@@ -340,13 +445,21 @@ class NSEBroadMarketFeed:
             vix_chg_pct = round(float(pct_vix), 2) if (pct_vix is not None and vix_val is not None) else None
             if vix_val is not None:
                 self.last_errors["vix"] = None
+                self.last_success_ts["vix"] = now_ts
+                self.consecutive_failures["vix"] = 0
+                self.exchange_ts["vix"] = now_ts
+                self.fetched_at["vix"] = now_ts
             else:
                 self.last_errors["vix"] = "INDIA VIX quote unavailable"
+                self.consecutive_failures["vix"] = self.consecutive_failures.get("vix", 0) + 1
+                self.fetched_at["vix"] = now_ts
         else:
             vix_val = None
             vix_chg = None
             vix_chg_pct = None
             self.last_errors["vix"] = "INDIA VIX missing in NSE allIndices feed"
+            self.consecutive_failures["vix"] = self.consecutive_failures.get("vix", 0) + 1
+            self.fetched_at["vix"] = now_ts
 
         if vix_val is None:
             vix_regime = "UNKNOWN"
@@ -455,24 +568,28 @@ class NSEBroadMarketFeed:
                 except Exception:
                     pass
 
-        # Check cached tick if within 15 seconds
-        if parsed_spot is None and self._cached_nifty_spot and self._cached_nifty_spot > 0:
-            age = now_ts - self._last_nifty_time
-            if age <= 15.0:
-                parsed_spot = self._cached_nifty_spot
-                live_change = self._cached_nifty_chg
-                live_change_pct = self._cached_nifty_chg_pct
-                nifty_tick_age = age
-
-        if parsed_spot is None and self._last_nifty_time > 0:
-            nifty_tick_age = now_ts - self._last_nifty_time
+        if parsed_spot is not None:
+            self.last_success_ts["indstocks_nifty"] = self._last_nifty_time
+            self.last_errors["indstocks_nifty"] = None
+            self.consecutive_failures["indstocks_nifty"] = 0
+            self.exchange_ts["indstocks_nifty"] = self._last_nifty_time
+            self.fetched_at["indstocks_nifty"] = self._last_nifty_time
+        else:
+            self.consecutive_failures["indstocks_nifty"] = self.consecutive_failures.get("indstocks_nifty", 0) + 1
+            self.last_errors["indstocks_nifty"] = "Nifty spot missing or failed"
+            self.fetched_at["indstocks_nifty"] = now_ts
+            if self._last_nifty_time > 0:
+                nifty_tick_age = now_ts - self._last_nifty_time
 
         # Live Sensex 30 spot & change from INDstocks
         sensex_spot, sensex_chg_pct, sensex_tick_age = self._fetch_sensex_quote()
 
-        # Determine overall data status: OK | PARTIAL | STALE
+        # Determine overall data status: OK | PARTIAL | STALE | MARKET_CLOSED
+        is_market_open = is_regular_nse_market_open()
         max_tick_age = max(sensex_tick_age, nifty_tick_age)
-        if max_tick_age > 15.0 or (parsed_spot is None and sensex_spot is None):
+        if not is_market_open:
+            data_status = "MARKET_CLOSED"
+        elif max_tick_age > 15.0 or (parsed_spot is None and sensex_spot is None):
             data_status = "STALE"
         elif parsed_spot is not None and sensex_spot is not None and full_adv is not None and full_dec is not None:
             data_status = "OK"

@@ -394,7 +394,19 @@ class MarketRegimeEngine:
             nifty_breadth.get("status") != "NO_DATA"
         )
 
-        is_stale = (tick_age is not None and tick_age > 15.0) or (raw_data_status == "STALE")
+        # Market Hours check (09:15 - 15:30 IST Mon-Fri)
+        hour = now.hour
+        minute = now.minute
+        is_weekday = now.weekday() < 5
+        is_market_open = is_weekday and ((hour == 9 and minute >= 15) or (10 <= hour < 15) or (hour == 15 and minute <= 30))
+
+        if not is_market_open or raw_data_status == "MARKET_CLOSED":
+            is_stale = False
+            is_market_closed = True
+        else:
+            is_stale = (tick_age is not None and tick_age > 15.0) or (raw_data_status == "STALE")
+            is_market_closed = False
+
         is_missing = (
             nifty_spot is None or
             sensex_spot is None or
@@ -402,9 +414,6 @@ class MarketRegimeEngine:
         )
 
         # Time-of-day BTST status
-        hour = now.hour
-        minute = now.minute
-        is_weekday = now.weekday() < 5
         is_btst_window = (is_weekday and hour == 15 and 10 <= minute <= 30)
         if is_btst_window:
             btst_time_status = "ACTIVE_NOW (3:10 - 3:30 PM IST)"
@@ -412,6 +421,96 @@ class MarketRegimeEngine:
             btst_time_status = "STANDBY (Activates 3:10 PM - 3:30 PM IST)"
         else:
             btst_time_status = "MARKET CLOSED (Overnight Session)"
+
+        # -------------------------------------------------------------
+        # GUARD: MARKET CLOSED -> NO STALE ALERT, REGIME = UNKNOWN
+        # -------------------------------------------------------------
+        if is_market_closed:
+            resolved_status = "MARKET_CLOSED"
+            trend_code = "UNKNOWN"
+            trend_label = "MARKET CLOSED"
+            score = 0
+            trend_color = "gray"
+            trend_description = "Market is closed. NSE trading hours are Mon-Fri 09:15 to 15:30 IST."
+            equity_action = "MARKET CLOSED"
+            equity_badge = "MARKET CLOSED"
+            equity_color = "gray"
+            equity_guidance = "Market is closed. No new signals."
+            option_action = "MARKET CLOSED"
+            option_badge = "MARKET CLOSED"
+            option_color = "gray"
+            option_guidance = "Market is closed. No options trading."
+
+            mgr = cls.get_state_manager()
+            regime_step = {
+                "current_regime": mgr.current_regime,
+                "raw_zone": "UNKNOWN",
+                "pending_candidate": mgr.pending_candidate,
+                "pending_count": mgr.pending_count,
+                "last_alerted_regime": mgr.last_alerted_regime,
+                "last_alert_time": mgr.last_alert_time,
+                "should_alert": False,
+                "alert_reason": "",
+                "suppression_reason": "MARKET_CLOSED",
+                "transition": {},
+                "regime_flipped": False,
+            }
+
+            bm_adv = bm_data.get("advances") if bm_data else None
+            bm_dec = bm_data.get("declines") if bm_data else None
+            bm_adr = bm_data.get("advance_decline_ratio") if bm_data else None
+
+            vix_info = broad_market.get("vix", {}) if broad_market else {}
+            deriv_info = broad_market.get("derivatives", {}) if broad_market else {}
+            vix_val = vix_info.get("value")
+            pcr_val = deriv_info.get("index_options_pcr")
+
+            return {
+                "timestamp": now.isoformat(),
+                "data_status": "MARKET_CLOSED",
+                "regime": trend_code,
+                "trend": {
+                    "code": trend_code,
+                    "label": trend_label,
+                    "score": score,
+                    "score_label": "-- / 100",
+                    "color": trend_color,
+                    "description": trend_description,
+                    "is_divergence": False,
+                },
+                "equities_directive": {
+                    "action": equity_action,
+                    "badge": equity_badge,
+                    "color": equity_color,
+                    "guidance": equity_guidance,
+                },
+                "options_directive": {
+                    "action": option_action,
+                    "badge": option_badge,
+                    "color": option_color,
+                    "guidance": option_guidance,
+                },
+                "btst_status": btst_time_status,
+                "metrics": {
+                    "nifty_spot": nifty_spot,
+                    "nifty_change_pct": nifty_chg,
+                    "sensex_spot": sensex_spot,
+                    "sensex_change_pct": sensex_chg,
+                    "advance_decline_ratio": bm_adr,
+                    "broad_market_advances": bm_adv,
+                    "broad_market_declines": bm_dec,
+                    "nifty_heavyweights_above_vwap": "0/5",
+                    "vix_value": vix_val,
+                    "options_pcr": pcr_val,
+                },
+                "regime_step": regime_step,
+                "should_alert": False,
+                "alert_reason": "",
+                "suppression_reason": "MARKET_CLOSED",
+                "transition": {},
+                "confirmed_regime": "UNKNOWN",
+                "raw_score": 0,
+            }
 
         # -------------------------------------------------------------
         # GUARD: STALE OR MISSING DATA -> REGIME = UNKNOWN, ZERO ALERTS, ZERO FLIPS
