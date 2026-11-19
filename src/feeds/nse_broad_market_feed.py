@@ -180,19 +180,28 @@ class NSEBroadMarketFeed:
                 except Exception as auth_err:
                     logger.debug("Auth client init notice: %s", auth_err)
 
-            token = self.auth_client.get_valid_token() if self.auth_client else (
-                os.getenv("INDMONEY_ACCESS_TOKEN") or os.getenv("INDSTOCKS_TOKEN")
-            )
+            if self.auth_client:
+                try:
+                    headers = self.auth_client.get_auth_headers()
+                except Exception:
+                    token = self.auth_client.access_token or os.getenv("INDMONEY_ACCESS_TOKEN")
+                    auth_val = f"Bearer {token}" if token and not str(token).startswith("Bearer ") else token
+                    headers = {"Authorization": auth_val, "Accept": "application/json"}
+            else:
+                token = os.getenv("INDMONEY_ACCESS_TOKEN") or os.getenv("INDSTOCKS_TOKEN")
+                auth_val = f"Bearer {token}" if token and not str(token).startswith("Bearer ") else token
+                headers = {"Authorization": auth_val, "Accept": "application/json"}
 
-            if token:
-                headers = {"Authorization": token, "Accept": "application/json"}
+            if headers.get("Authorization"):
                 url = f"https://api.indstocks.com/market/quotes/full?scrip-codes={scrip_code}"
                 resp = requests.get(url, headers=headers, timeout=2.5)
                 if resp.status_code in (401, 403) and self.auth_client:
-                    token = self.auth_client.force_refresh_token()
-                    if token:
-                        headers["Authorization"] = token
+                    try:
+                        self.auth_client.get_valid_token(auto_refresh=False)
+                        headers = self.auth_client.get_auth_headers()
                         resp = requests.get(url, headers=headers, timeout=2.5)
+                    except Exception:
+                        pass
 
                 if resp.status_code == 200:
                     payload = resp.json()
