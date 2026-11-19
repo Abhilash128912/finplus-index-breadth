@@ -119,6 +119,8 @@ async def serve_cockpit() -> FileResponse:
 
 
 @app.api_route("/api/status", methods=["GET", "HEAD"])
+@app.api_route("/api/health", methods=["GET", "HEAD"])
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def get_health_status() -> Dict[str, Any]:
     """Health check endpoint and Render keep-alive ping."""
     scheduler.ensure_scheduler_running()
