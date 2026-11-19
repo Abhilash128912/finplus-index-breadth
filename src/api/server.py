@@ -152,15 +152,46 @@ async def get_regime_debug() -> Dict[str, Any]:
 @app.get("/api/breadth")
 async def get_breadth_data() -> Dict[str, Any]:
     """Returns the most recent exchange-wide, Nifty 50, Sensex 30, and market regime snapshot."""
+    import time
+    from src.feeds.nse_broad_market_feed import is_regular_nse_market_open
     scheduler.ensure_scheduler_running()
     if not scheduler.latest_nifty_breadth:
         scheduler.refresh_breadth()
+
+    now_ts = time.time()
+    is_market_open = is_regular_nse_market_open()
+
+    bm = dict(scheduler.latest_broad_market) if scheduler.latest_broad_market else {}
+    regime = dict(scheduler.latest_regime_result) if scheduler.latest_regime_result else {}
+    nifty = dict(scheduler.latest_nifty_breadth) if scheduler.latest_nifty_breadth else {}
+    sensex = dict(scheduler.latest_sensex_breadth) if scheduler.latest_sensex_breadth else {}
+
+    # Dynamically verify data age based on wall-clock time
+    fetch_time = bm.get("fetch_time")
+    if fetch_time:
+        real_age = max(0.0, round(now_ts - float(fetch_time), 1))
+        bm["tick_age"] = real_age
+        if not is_market_open:
+            bm["data_status"] = "MARKET_CLOSED"
+        elif real_age > 15.0:
+            bm["data_status"] = "STALE"
+            # When stale, spot must be marked None and regime UNKNOWN
+            bm["nifty_spot"] = None
+            bm["sensex_spot"] = None
+            regime["regime"] = "UNKNOWN"
+            regime["data_status"] = "STALE"
+            if "trend" in regime:
+                regime["trend"]["code"] = "UNKNOWN"
+                regime["trend"]["label"] = "UNKNOWN (STALE DATA >15s)"
+            nifty["status"] = "STALE"
+            sensex["status"] = "STALE"
+
     return {
         "timestamp": datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5, minutes=30))).isoformat(),
-        "broad_market": scheduler.latest_broad_market,
-        "nifty": scheduler.latest_nifty_breadth,
-        "sensex": scheduler.latest_sensex_breadth,
-        "market_regime": scheduler.latest_regime_result,
+        "broad_market": bm,
+        "nifty": nifty,
+        "sensex": sensex,
+        "market_regime": regime,
     }
 
 
