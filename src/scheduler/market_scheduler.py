@@ -91,92 +91,111 @@ class MarketScheduler:
                         adv = max(1, int(round((bm_adv / (bm_adv + bm_dec)) * 50)))
                         dec = 50 - adv
                     else:
-                        chg_val = float(self.latest_broad_market.get("nifty_change_pct", -0.56) if self.latest_broad_market else -0.56)
-                        if chg_val <= -0.15:
-                            adv = 12
-                            dec = 38
-                        elif chg_val >= 0.15:
-                            adv = 38
-                            dec = 12
-                        else:
-                            adv = 23
-                            dec = 27
+                        adv = None
+                        dec = None
 
-                tot = adv + dec + unch or 50
-                adr = round(adv / max(dec, 1), 2)
-                wabi = round((adv - dec) / tot, 2)
-                above_pct = round((adv / tot) * 100.0, 1)
-                thrust_pct = round((adv / max(adv + dec, 1)) * 100.0, 1)
-                regime = "STRONG_DOWNTREND" if wabi < -0.4 else ("BEARISH_DISTRIBUTION" if wabi < -0.15 else ("BULLISH_EXPANSION" if wabi > 0.15 else "CHOPPY_ROTATION"))
-                n_spot = float(nf50.get("ltp") or self.latest_broad_market.get("nifty_spot", 24847.2))
-                n_chg = float(self.latest_broad_market.get("nifty_change_pct", -0.56))
+                tot = (adv + dec + unch) if (adv is not None and dec is not None) else None
+                adr = round(adv / max(dec, 1), 2) if (adv is not None and dec is not None) else None
+                wabi = round((adv - dec) / tot, 2) if (adv is not None and dec is not None and tot) else None
+                above_pct = round((adv / tot) * 100.0, 1) if (adv is not None and tot) else None
+                thrust_pct = round((adv / max(adv + dec, 1)) * 100.0, 1) if (adv is not None and dec is not None) else None
+                regime = (
+                    "STRONG_DOWNTREND" if (wabi is not None and wabi < -0.4)
+                    else ("BEARISH_DISTRIBUTION" if (wabi is not None and wabi < -0.15)
+                    else ("BULLISH_EXPANSION" if (wabi is not None and wabi > 0.15)
+                    else ("CHOPPY_ROTATION" if wabi is not None else "UNKNOWN")))
+                )
+                n_spot_raw = nf50.get("ltp") if nf50 else None
+                if n_spot_raw is None and self.latest_broad_market:
+                    n_spot_raw = self.latest_broad_market.get("nifty_spot")
+                n_spot = float(n_spot_raw) if (n_spot_raw is not None and float(n_spot_raw) > 0) else None
+                n_chg = float(self.latest_broad_market.get("nifty_change_pct")) if (self.latest_broad_market and self.latest_broad_market.get("nifty_change_pct") is not None) else None
 
-                # Update segments so downstream views never show 0
-                if self.latest_broad_market and "segments" in self.latest_broad_market:
-                    segs = self.latest_broad_market["segments"]
-                    segs["nifty_50"]["advances"] = adv
-                    segs["nifty_50"]["declines"] = dec
-                    segs["nifty_500"]["advances"] = adv * 10
-                    segs["nifty_500"]["declines"] = dec * 10
-                    segs["nifty_midcap"]["advances"] = max(1, int(adv * 3))
-                    segs["nifty_midcap"]["declines"] = max(1, int(dec * 3))
-                    segs["nifty_smallcap"]["advances"] = max(1, int(adv * 5))
-                    segs["nifty_smallcap"]["declines"] = max(1, int(dec * 5))
+                if adv is not None and dec is not None and tot:
+                    # Update segments so downstream views never show 0
+                    if self.latest_broad_market and "segments" in self.latest_broad_market:
+                        segs = self.latest_broad_market["segments"]
+                        segs["nifty_50"]["advances"] = adv
+                        segs["nifty_50"]["declines"] = dec
+                        segs["nifty_500"]["advances"] = adv * 10
+                        segs["nifty_500"]["declines"] = dec * 10
+                        segs["nifty_midcap"]["advances"] = max(1, int(adv * 3))
+                        segs["nifty_midcap"]["declines"] = max(1, int(dec * 3))
+                        segs["nifty_smallcap"]["advances"] = max(1, int(adv * 5))
+                        segs["nifty_smallcap"]["declines"] = max(1, int(dec * 5))
 
-                self.latest_nifty_breadth = {
-                    "index": "NIFTY 50",
-                    "status": "LIVE_STREAMING",
-                    "total_constituents": tot,
-                    "stocks_above_vwap": adv,
-                    "stocks_above_vwap_pct": above_pct,
-                    "stocks_below_vwap": dec,
-                    "advances": adv,
-                    "declines": dec,
-                    "unchanged": unch,
-                    "advance_decline_ratio": adr,
-                    "volume_thrust_pct": thrust_pct,
-                    "wabi_score": wabi,
-                    "regime": regime,
-                    "sentiment": "BEARISH" if wabi < -0.1 else ("BULLISH" if wabi > 0.1 else "NEUTRAL"),
-                    "spot_price": n_spot,
-                    "change_pct": n_chg,
-                    "heavyweights": {
-                        "HDFCBANK": "BELOW_VWAP" if dec > adv else "ABOVE_VWAP",
-                        "RELIANCE": "BELOW_VWAP" if dec > adv else "ABOVE_VWAP",
-                        "ICICIBANK": "BELOW_VWAP" if dec > adv else "ABOVE_VWAP",
-                        "INFY": "BELOW_VWAP" if dec > adv else "ABOVE_VWAP",
-                        "ITC": "BELOW_VWAP" if dec > adv else "ABOVE_VWAP",
-                    },
-                    "heavyweights_above_vwap_ratio": f"{max(0, min(5, int(round((adv / tot) * 5))))}/5",
-                    "timestamp": datetime.datetime.now(tz=IST).isoformat(),
-                }
-                logger.info("Live Nifty 50 breadth updated: %d Adv / %d Dec (ADR %.2f:1, Spot %.2f)", adv, dec, adr, n_spot)
+                    self.latest_nifty_breadth = {
+                        "index": "NIFTY 50",
+                        "status": "LIVE_STREAMING",
+                        "total_constituents": tot,
+                        "stocks_above_vwap": adv,
+                        "stocks_above_vwap_pct": above_pct,
+                        "stocks_below_vwap": dec,
+                        "advances": adv,
+                        "declines": dec,
+                        "unchanged": unch,
+                        "advance_decline_ratio": adr,
+                        "volume_thrust_pct": thrust_pct,
+                        "wabi_score": wabi,
+                        "regime": regime,
+                        "sentiment": "BEARISH" if (wabi is not None and wabi < -0.1) else ("BULLISH" if (wabi is not None and wabi > 0.1) else "NEUTRAL"),
+                        "spot_price": n_spot,
+                        "change_pct": n_chg,
+                        "heavyweights": {
+                            "HDFCBANK": "BELOW_VWAP" if dec > adv else "ABOVE_VWAP",
+                            "RELIANCE": "BELOW_VWAP" if dec > adv else "ABOVE_VWAP",
+                            "ICICIBANK": "BELOW_VWAP" if dec > adv else "ABOVE_VWAP",
+                            "INFY": "BELOW_VWAP" if dec > adv else "ABOVE_VWAP",
+                            "ITC": "BELOW_VWAP" if dec > adv else "ABOVE_VWAP",
+                        },
+                        "heavyweights_above_vwap_ratio": f"{max(0, min(5, int(round((adv / tot) * 5))))}/5",
+                        "timestamp": datetime.datetime.now(tz=IST).isoformat(),
+                    }
+                    logger.info("Live Nifty 50 breadth updated: %d Adv / %d Dec (ADR %.2f:1, Spot %s)", adv, dec, adr or 0.0, str(n_spot))
+                else:
+                    self.latest_nifty_breadth = {
+                        "index": "NIFTY 50",
+                        "status": "NO_DATA",
+                        "spot_price": n_spot,
+                        "change_pct": n_chg,
+                        "timestamp": datetime.datetime.now(tz=IST).isoformat(),
+                    }
 
             if self.latest_sensex_breadth.get("status") == "NO_DATA" or (self.latest_sensex_breadth.get("advances", 0) == 0 and self.latest_sensex_breadth.get("declines", 0) == 0):
-                s_spot = float(self.latest_broad_market.get("sensex_spot", 80757.2) if self.latest_broad_market else 80757.2)
-                s_chg = float(self.latest_broad_market.get("sensex_change_pct", -0.33) if self.latest_broad_market else -0.33)
-                nf_adv = self.latest_nifty_breadth.get("advances", 12)
-                adv_ratio = nf_adv / 50.0
-                s_adv = max(1, int(round(adv_ratio * 30)))
-                s_dec = 30 - s_adv
-                s_wabi = round((s_adv - s_dec) / 30.0, 2)
-                self.latest_sensex_breadth = {
-                    "index": "SENSEX 30",
-                    "status": "LIVE_STREAMING",
-                    "total_constituents": 30,
-                    "stocks_above_vwap": s_adv,
-                    "stocks_above_vwap_pct": round((s_adv / 30.0) * 100.0, 1),
-                    "stocks_below_vwap": s_dec,
-                    "advances": s_adv,
-                    "declines": s_dec,
-                    "unchanged": 0,
-                    "advance_decline_ratio": round(s_adv / max(s_dec, 1), 2),
-                    "wabi_score": s_wabi,
-                    "sentiment": "BEARISH" if s_wabi < 0 else "BULLISH",
-                    "spot_price": s_spot,
-                    "change_pct": s_chg,
-                    "timestamp": datetime.datetime.now(tz=IST).isoformat(),
-                }
+                s_spot_raw = self.latest_broad_market.get("sensex_spot") if self.latest_broad_market else None
+                s_spot = float(s_spot_raw) if (s_spot_raw is not None and float(s_spot_raw) > 0) else None
+                s_chg = float(self.latest_broad_market.get("sensex_change_pct")) if (self.latest_broad_market and self.latest_broad_market.get("sensex_change_pct") is not None) else None
+                nf_adv = self.latest_nifty_breadth.get("advances") if self.latest_nifty_breadth else None
+                if nf_adv is not None:
+                    adv_ratio = nf_adv / 50.0
+                    s_adv = max(1, int(round(adv_ratio * 30)))
+                    s_dec = 30 - s_adv
+                    s_wabi = round((s_adv - s_dec) / 30.0, 2)
+                    self.latest_sensex_breadth = {
+                        "index": "SENSEX 30",
+                        "status": "LIVE_STREAMING",
+                        "total_constituents": 30,
+                        "stocks_above_vwap": s_adv,
+                        "stocks_above_vwap_pct": round((s_adv / 30.0) * 100.0, 1),
+                        "stocks_below_vwap": s_dec,
+                        "advances": s_adv,
+                        "declines": s_dec,
+                        "unchanged": 0,
+                        "advance_decline_ratio": round(s_adv / max(s_dec, 1), 2),
+                        "wabi_score": s_wabi,
+                        "sentiment": "BEARISH" if s_wabi < 0 else "BULLISH",
+                        "spot_price": s_spot,
+                        "change_pct": s_chg,
+                        "timestamp": datetime.datetime.now(tz=IST).isoformat(),
+                    }
+                else:
+                    self.latest_sensex_breadth = {
+                        "index": "SENSEX 30",
+                        "status": "NO_DATA",
+                        "spot_price": s_spot,
+                        "change_pct": s_chg,
+                        "timestamp": datetime.datetime.now(tz=IST).isoformat(),
+                    }
 
             # 3. Evaluate Market Trend Regime & Intraday Trading Directives (Core Engine)
             self.latest_regime_result = MarketRegimeEngine.evaluate_regime(

@@ -40,6 +40,7 @@ DEFAULT_REGIME_STATE_PATH = Path(__file__).resolve().parent / "regime_state.json
 
 # Numeric level hierarchy for multi-level jump calculation
 REGIME_LEVELS = {
+    "UNKNOWN": 0,
     "STRONG_DOWNTREND": -2,
     "DOWNTREND": -1,
     "CHOPPY": 0,
@@ -49,6 +50,7 @@ REGIME_LEVELS = {
 }
 
 REGIME_LABELS = {
+    "UNKNOWN": "UNKNOWN (NO RELIABLE DATA)",
     "STRONG_UPTREND": "STRONG UPTREND (ALL-PILLAR CONFLUENCE)",
     "UPTREND": "UPTREND (MODERATE BULL BIAS)",
     "CHOPPY": "CHOPPY / RANGEBOUND (SIDEWAYS)",

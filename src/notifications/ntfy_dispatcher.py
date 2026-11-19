@@ -182,7 +182,12 @@ class NTFYDispatcher:
         nifty_above = nifty.get("stocks_above_vwap_pct", 0.0)
         nifty_wabi = nifty.get("wabi_score", 0.0)
         nifty_chg = nifty.get("change_pct", 0.0)
-        nifty_spot = nifty.get("spot_price", 24850.0)
+        nifty_spot = nifty.get("spot_price")
+        if nifty_spot is not None:
+            try:
+                nifty_spot = float(nifty_spot)
+            except (ValueError, TypeError):
+                nifty_spot = None
 
         total_adv = broad.get("advances", nifty.get("advances", 0))
         total_dec = broad.get("declines", nifty.get("declines", 0))
@@ -191,15 +196,22 @@ class NTFYDispatcher:
         bm_root = breadth_snapshot.get("broad_market", {})
         vix_info = bm_root.get("vix", {})
         deriv_info = bm_root.get("derivatives", {})
+        vix_val = vix_info.get("value")
+        pcr_val = deriv_info.get("index_options_pcr")
+        vix_str = f"VIX {float(vix_val):.2f}" if vix_val is not None else "VIX N/A"
+        pcr_str = f"PCR {float(pcr_val):.2f}" if pcr_val is not None else "PCR N/A"
 
         title = f"FinPlus Breadth | {now_str}"
 
+        spot_str = f"NIFTY {nifty_spot:,.0f}" if nifty_spot is not None else "NIFTY N/A"
+        chg_str = f" ({nifty_chg:+.2f}%)" if nifty_chg is not None else ""
+
         msg_lines = [
-            f"Spot: NIFTY {nifty_spot:,.0f} ({nifty_chg:+.2f}%) | Trend: {trend_label}",
+            f"Spot: {spot_str}{chg_str} | Trend: {trend_label}",
             f"Equities: {equity_action}",
             f"Options: {option_action}",
             f"ADR: {adr}:1 ({total_adv} Adv / {total_dec} Dec) | Nifty > VWAP: {nifty_above:.1f}% | WABI: {nifty_wabi:+.2f}",
-            f"Pillars: VIX {vix_info.get('value', 15.5):.2f} | PCR {deriv_info.get('index_options_pcr', 0.85):.2f}",
+            f"Pillars: {vix_str} | {pcr_str}",
             f"Cockpit: https://finplus-index-breadth.onrender.com"
         ]
 

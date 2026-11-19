@@ -118,8 +118,15 @@ class IndexBTSTEngine:
 
         sensex_wabi = sensex_breadth.get("wabi_score", 0.0)
 
-        nifty_spot = float(broad_market.get("nifty_spot", 24925.0)) if broad_market else 24925.0
-        sensex_spot = 79450.0
+        nifty_spot_raw = broad_market.get("nifty_spot") if broad_market else None
+        if nifty_spot_raw is None and nifty_breadth:
+            nifty_spot_raw = nifty_breadth.get("spot_price")
+        nifty_spot = float(nifty_spot_raw) if (nifty_spot_raw is not None and float(nifty_spot_raw) > 0) else None
+
+        sensex_spot_raw = broad_market.get("sensex_spot") if broad_market else None
+        if sensex_spot_raw is None and sensex_breadth:
+            sensex_spot_raw = sensex_breadth.get("spot_price")
+        sensex_spot = float(sensex_spot_raw) if (sensex_spot_raw is not None and float(sensex_spot_raw) > 0) else None
 
         passed_gates: List[str] = []
         failed_gates: List[str] = []
@@ -195,9 +202,9 @@ class IndexBTSTEngine:
             synthesis_directive = "🛑 HOLD 100% CASH OVERNIGHT"
             synthesis_desc = "Market breadth lacks institutional momentum. Hold cash to avoid overnight theta decay."
 
-        # Compute contracts: only active if BTST is strictly qualified
-        nifty_contract = compute_atm_option(nifty_spot, "NIFTY") if is_qualified else None
-        sensex_contract = compute_atm_option(sensex_spot, "SENSEX") if is_qualified else None
+        # Compute contracts: only active if BTST is strictly qualified and spot exists
+        nifty_contract = compute_atm_option(nifty_spot, "NIFTY") if (is_qualified and nifty_spot) else None
+        sensex_contract = compute_atm_option(sensex_spot, "SENSEX") if (is_qualified and sensex_spot) else None
 
         preferred_index = ("NIFTY 50" if nifty_wabi >= sensex_wabi else "SENSEX 30") if is_qualified else "NONE (HOLD 100% CASH)"
         primary_contract = (nifty_contract if preferred_index == "NIFTY 50" else sensex_contract) if is_qualified else None

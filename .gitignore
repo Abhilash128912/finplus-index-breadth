@@ -7,4 +7,6 @@ logs/
 __pycache__/
 *.pyc
 .pytest_cache/
+config/indmoney_token.json
+config/regime_state.json
 

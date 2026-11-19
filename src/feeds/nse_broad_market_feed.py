@@ -15,6 +15,7 @@ Fetches official exchange-wide breadth across ALL actively traded NSE equities (
 from __future__ import annotations
 
 import datetime
+import time
 from typing import Any, Dict, Optional
 
 import requests
@@ -40,78 +41,83 @@ class NSEBroadMarketFeed:
         self.session = requests.Session()
         self._last_cookie_time: float = 0.0
         self._cached_sensex_spot: Optional[float] = None
-        self._cached_sensex_chg_pct: float = 0.0
+        self._cached_sensex_chg_pct: Optional[float] = None
+        self._last_sensex_time: float = 0.0
+        self._cached_nifty_spot: Optional[float] = None
+        self._cached_nifty_chg: Optional[float] = None
+        self._cached_nifty_chg_pct: Optional[float] = None
+        self._last_nifty_time: float = 0.0
 
-    def _fetch_sensex_quote(self) -> tuple[float, float]:
+    def _fetch_indstocks_quote(self, scrip_code: str) -> Optional[Dict[str, Any]]:
         """
-        Fetches real-time Sensex 30 spot and change percentage.
-        PRIMARY: Official INDstocks (INDmoney) broker quote feed (BIDX_40000006).
-        BACKUP ONLY: Yahoo Finance / YFinance used strictly as emergency fallback.
+        Fetches live real-time index quote from INDstocks broker API.
+        Used for Sensex (BIDX_40000006) and Nifty (NIDX_40000001).
+        Zero external/third-party dependencies.
         """
-        # 1. PRIMARY: INDstocks Broker Live Quote Feed
         try:
             import os
+            from pathlib import Path
+            import sys
+            root_dir = str(Path(__file__).resolve().parent.parent.parent)
+            if root_dir not in sys.path:
+                sys.path.insert(0, root_dir)
+            ac = None
             token = os.getenv("INDMONEY_ACCESS_TOKEN") or os.getenv("INDSTOCKS_TOKEN")
-            if not token:
-                try:
-                    from finplus_core.auth import INDMoneyAuthClient
-                    ac = INDMoneyAuthClient()
+            try:
+                from finplus_core.auth import INDMoneyAuthClient
+                ac = INDMoneyAuthClient()
+                if not token or not ac.is_token_valid():
                     token = ac.get_valid_token()
-                except Exception:
-                    pass
+            except Exception as auth_err:
+                logger.debug("Auth client init notice: %s", auth_err)
 
             if token:
                 headers = {"Authorization": token, "Accept": "application/json"}
-                url = "https://api.indstocks.com/market/quotes/full?scrip-codes=BIDX_40000006"
+                url = f"https://api.indstocks.com/market/quotes/full?scrip-codes={scrip_code}"
                 resp = requests.get(url, headers=headers, timeout=2.5)
+                if resp.status_code in (401, 403) and ac:
+                    token = ac.force_refresh_token()
+                    if token:
+                        headers["Authorization"] = token
+                        resp = requests.get(url, headers=headers, timeout=2.5)
+
                 if resp.status_code == 200:
-                    data = resp.json().get("data", {}).get("BIDX_40000006", {})
-                    p = float(data.get("live_price") or 0.0)
-                    chg = float(data.get("day_change_percentage") or 0.0)
-                    if p > 50000:
-                        self._cached_sensex_spot = round(p, 2)
-                        self._cached_sensex_chg_pct = round(chg, 2)
-                        return self._cached_sensex_spot, self._cached_sensex_chg_pct
-        except Exception as ind_err:
-            logger.debug("INDstocks primary Sensex fetch notice: %s", ind_err)
+                    data = resp.json().get("data", {}).get(scrip_code, {})
+                    return data
+        except Exception as e:
+            logger.debug("INDstocks quote fetch notice for %s: %s", scrip_code, e)
+        return None
 
-        # 2. Return last cached live tick if valid
+    def _fetch_sensex_quote(self) -> tuple[Optional[float], Optional[float], float]:
+        """
+        Fetches real-time Sensex 30 spot and change percentage.
+        PRIMARY & SOLE SOURCE: Official INDstocks (INDmoney) broker quote feed (BIDX_40000006).
+        Returns (spot, change_pct, tick_age). If missing or stale (>15s), spot is None.
+        Never invent a number.
+        """
+        now = time.time()
+        data = self._fetch_indstocks_quote("BIDX_40000006")
+        if data:
+            try:
+                p = float(data.get("live_price") or 0.0)
+                chg = float(data.get("day_change_percentage") or 0.0)
+                if p > 50000:
+                    self._cached_sensex_spot = round(p, 2)
+                    self._cached_sensex_chg_pct = round(chg, 2)
+                    self._last_sensex_time = now
+                    return self._cached_sensex_spot, self._cached_sensex_chg_pct, 0.0
+            except Exception:
+                pass
+
+        # Return cached live tick if fresh (within 15 seconds)
         if self._cached_sensex_spot and self._cached_sensex_spot > 50000:
-            return self._cached_sensex_spot, self._cached_sensex_chg_pct
+            age = now - self._last_sensex_time
+            if age <= 15.0:
+                return self._cached_sensex_spot, self._cached_sensex_chg_pct, age
 
-        # 3. BACKUP ONLY: Emergency Yahoo Finance Chart v8 (if broker API is unreachable)
-        try:
-            url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EBSESN?interval=1d"
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-            resp = requests.get(url, headers=headers, timeout=3.0)
-            if resp.status_code == 200:
-                meta = resp.json().get("chart", {}).get("result", [{}])[0].get("meta", {})
-                price = meta.get("regularMarketPrice")
-                prev = meta.get("chartPreviousClose") or price
-                if price and float(price) > 50000:
-                    chg_pct = round(((float(price) - float(prev)) / float(prev)) * 100.0, 2) if prev else 0.0
-                    self._cached_sensex_spot = round(float(price), 2)
-                    self._cached_sensex_chg_pct = chg_pct
-                    return self._cached_sensex_spot, self._cached_sensex_chg_pct
-        except Exception as e:
-            logger.debug(f"Yahoo chart backup Sensex fetch notice: {e}")
-
-        # 4. Fallback to yfinance if all else fails
-        try:
-            import yfinance as yf
-            _t = yf.Ticker('^BSESN')
-            _p = getattr(_t.fast_info, 'last_price', None) or (getattr(_t.fast_info, 'get', None) and _t.fast_info.get('lastPrice'))
-            _prev = getattr(_t.fast_info, 'previous_close', None) or (getattr(_t.fast_info, 'get', None) and _t.fast_info.get('previousClose'))
-            if _p and float(_p) > 50000:
-                _prev = float(_prev) if _prev else float(_p)
-                chg_pct = round(((float(_p) - _prev) / _prev) * 100.0, 2)
-                self._cached_sensex_spot = round(float(_p), 2)
-                self._cached_sensex_chg_pct = chg_pct
-                return self._cached_sensex_spot, self._cached_sensex_chg_pct
-        except Exception as e:
-            logger.debug(f"yfinance backup Sensex fetch notice: {e}")
-
-        return 0.0, 0.0
+        # Stale or missing -> return None (never invent a number)
+        age = (now - self._last_sensex_time) if self._last_sensex_time > 0 else 999.0
+        return None, None, age
 
     def _prime_session(self) -> None:
         """Initializes tracking cookies with NSE."""
@@ -240,15 +246,19 @@ class NSEBroadMarketFeed:
             full_dec = live_broad_dec
             full_unc = live_broad_unc
         else:
-            full_adv = int(raw_all_stocks.get("advances", 674))
-            full_dec = int(raw_all_stocks.get("declines", 1343))
-            full_unc = int(raw_all_stocks.get("unchanged", 249))
+            full_adv = int(raw_all_stocks["advances"]) if raw_all_stocks.get("advances") is not None else None
+            full_dec = int(raw_all_stocks["declines"]) if raw_all_stocks.get("declines") is not None else None
+            full_unc = int(raw_all_stocks["unchanged"]) if raw_all_stocks.get("unchanged") is not None else None
 
-        full_total = full_adv + full_dec + full_unc if (full_adv + full_dec + full_unc) > 0 else 2266
-        full_adr = round(full_adv / max(full_dec, 1), 2)
+        if full_adv is not None and full_dec is not None:
+            full_total = full_adv + full_dec + (full_unc or 0)
+            full_adr = round(full_adv / max(full_dec, 1), 2)
+        else:
+            full_total = None
+            full_adr = None
 
         # Non-zero segment fallback for Cloud/Datacenter environments
-        if n500_adv == 0 and n500_dec == 0 and full_adv > 0:
+        if n500_adv == 0 and n500_dec == 0 and full_adv is not None and full_adv > 0:
             ratio = full_adv / max(full_adv + full_dec, 1)
             n50_adv = max(1, int(round(ratio * 50)))
             n50_dec = 50 - n50_adv
@@ -259,28 +269,21 @@ class NSEBroadMarketFeed:
             small_adv = max(1, int(round(ratio * 250)))
             small_dec = 250 - small_adv
         else:
-            n50_adv = int(nifty_50.get("advances") or 0)
-            n50_dec = int(nifty_50.get("declines") or 0)
+            n50_adv = int(nifty_50["advances"]) if nifty_50.get("advances") is not None else (n500_adv if n500_adv > 0 else None)
+            n50_dec = int(nifty_50["declines"]) if nifty_50.get("declines") is not None else (n500_dec if n500_dec > 0 else None)
 
         # Parse India VIX
-        vix_val = float(india_vix_entry.get("last") or 0.0)
-        vix_chg = float(india_vix_entry.get("variation") or 0.0)
-        vix_chg_pct = float(india_vix_entry.get("percentChange") or 0.0)
-        if vix_val == 0.0:
-            try:
-                import yfinance as yf
-                t_vix = yf.Ticker('^INDIAVIX').history(period='1d', interval='1m')
-                if not t_vix.empty:
-                    vix_val = round(float(t_vix.iloc[-1]['Close']), 2)
-                    p_vix = yf.Ticker('^INDIAVIX').fast_info.get('previous_close') or vix_val
-                    vix_chg = round(vix_val - p_vix, 2)
-                    vix_chg_pct = round((vix_chg / p_vix) * 100.0, 2)
-            except Exception:
-                vix_val = 17.50
-                vix_chg = -0.90
-                vix_chg_pct = -4.90
+        last_vix = india_vix_entry.get("last")
+        vix_val = round(float(last_vix), 2) if (last_vix is not None and float(last_vix) > 0) else None
+        var_vix = india_vix_entry.get("variation")
+        vix_chg = round(float(var_vix), 2) if (var_vix is not None and vix_val is not None) else None
+        pct_vix = india_vix_entry.get("percentChange")
+        vix_chg_pct = round(float(pct_vix), 2) if (pct_vix is not None and vix_val is not None) else None
 
-        if vix_val < 12.0:
+        if vix_val is None:
+            vix_regime = "UNKNOWN"
+            vix_label = "VIX Unavailable"
+        elif vix_val < 12.0:
             vix_regime = "LOW_VOLATILITY_THETA_DECAY"
             vix_label = "Low Volatility (High Theta Bleed)"
         elif vix_val <= 16.5:
@@ -294,20 +297,25 @@ class NSEBroadMarketFeed:
             vix_label = "High Volatility (Event Risk / IV Crush)"
 
         # Parse PCR Regime
-        if pcr_val >= 1.25:
+        if pcr_val is not None and pcr_val >= 1.25:
             pcr_regime = "BULLISH_PUT_WRITING_SUPPORT"
             pcr_label = "Bullish Floor (Put Writing Dominates)"
-        elif pcr_val >= 0.85:
+        elif pcr_val is not None and pcr_val >= 0.85:
             pcr_regime = "NEUTRAL_EQUILIBRIUM"
             pcr_label = "Equilibrium (Balanced OI)"
-        else:
+        elif pcr_val is not None:
             pcr_regime = "CALL_WRITING_RESISTANCE"
             pcr_label = "Overhead Resistance (Call Writing Dominates)"
+        else:
+            pcr_regime = "UNKNOWN"
+            pcr_label = "PCR Unavailable"
 
         # Total Exchange Turnover
         eq_turnover = turnover_data.get("yesterday", {}) or turnover_data.get("today", {})
-        total_volume = int(eq_turnover.get("volume", 3528797247))
-        total_value_cr = round(float(eq_turnover.get("value", 1107796241968.77)) / 1e7, 2)
+        vol_raw = eq_turnover.get("volume")
+        total_volume = int(vol_raw) if vol_raw is not None else None
+        val_raw = eq_turnover.get("value")
+        total_value_cr = round(float(val_raw) / 1e7, 2) if val_raw is not None else None
 
         # Sectoral Leadership & Rotation
         tracked_sectors = [
@@ -328,43 +336,92 @@ class NSEBroadMarketFeed:
         top_leader = sector_items[0] if sector_items else {}
         top_laggard = sector_items[-1] if sector_items else {}
 
-        # Parse accurate live Nifty spot price
+        # Parse accurate live Nifty spot price and previous close
         live_spot = market_state.get("last") or nifty_50.get("last")
-        parsed_spot = 0.0
-        live_change = 0.0
-        live_change_pct = 0.0
+        prev_close_val = nifty_50.get("previousClose")
+        p_close = float(prev_close_val) if prev_close_val is not None else None
+        now_ts = time.time()
+
+        parsed_spot = None
+        live_change = None
+        live_change_pct = None
+        nifty_tick_age = 999.0
+
         if live_spot:
             try:
-                parsed_spot = round(float(live_spot), 2)
-                live_change = float(market_state.get("variation") or nifty_50.get("variation") or 0.0)
-                live_change_pct = float(market_state.get("percentChange") or nifty_50.get("percentChange") or 0.0)
+                ps = round(float(live_spot), 2)
+                var = market_state.get("variation") or nifty_50.get("variation")
+                pchg = market_state.get("percentChange") or nifty_50.get("percentChange")
+                if ps > 0:
+                    parsed_spot = ps
+                    live_change = round(float(var), 2) if var is not None else None
+                    live_change_pct = round(float(pchg), 2) if pchg is not None else None
+                    self._cached_nifty_spot = parsed_spot
+                    self._cached_nifty_chg = live_change
+                    self._cached_nifty_chg_pct = live_change_pct
+                    self._last_nifty_time = now_ts
+                    nifty_tick_age = 0.0
             except Exception:
-                parsed_spot = 0.0
+                pass
 
-        if not parsed_spot:
-            try:
-                import yfinance as yf
-                t_nifty = yf.Ticker('^NSEI').history(period='1d', interval='1m')
-                if not t_nifty.empty:
-                    parsed_spot = round(float(t_nifty.iloc[-1]['Close']), 2)
-                    p_close = yf.Ticker('^NSEI').fast_info.get('previous_close') or 24965.0
-                    live_change = round(parsed_spot - p_close, 2)
-                    live_change_pct = round((live_change / p_close) * 100.0, 2)
-            except Exception:
-                parsed_spot = 24881.3
-                live_change = -83.7
-                live_change_pct = -0.34
+        # If NSE data didn't provide live spot, try INDstocks (NIDX_40000001)
+        if parsed_spot is None:
+            n_data = self._fetch_indstocks_quote("NIDX_40000001")
+            if n_data:
+                try:
+                    p = float(n_data.get("live_price") or 0.0)
+                    chg = float(n_data.get("day_change_percentage") or 0.0)
+                    ind_prev = float(n_data.get("prev_close") or n_data.get("close_price") or 0.0)
+                    var = float(n_data.get("day_change") or (p - ind_prev) if ind_prev else 0.0)
+                    if p > 0:
+                        parsed_spot = round(p, 2)
+                        live_change = round(var, 2)
+                        live_change_pct = round(chg, 2)
+                        self._cached_nifty_spot = parsed_spot
+                        self._cached_nifty_chg = live_change
+                        self._cached_nifty_chg_pct = live_change_pct
+                        self._last_nifty_time = now_ts
+                        nifty_tick_age = 0.0
+                        if p_close is None and ind_prev > 0:
+                            p_close = round(ind_prev, 2)
+                except Exception:
+                    pass
 
-        # Live Sensex 30 spot & change (dynamic live quote, zero static 82,300 fallback)
-        sensex_spot, sensex_chg_pct = self._fetch_sensex_quote()
+        # Check cached tick if within 15 seconds
+        if parsed_spot is None and self._cached_nifty_spot and self._cached_nifty_spot > 0:
+            age = now_ts - self._last_nifty_time
+            if age <= 15.0:
+                parsed_spot = self._cached_nifty_spot
+                live_change = self._cached_nifty_chg
+                live_change_pct = self._cached_nifty_chg_pct
+                nifty_tick_age = age
+
+        if parsed_spot is None and self._last_nifty_time > 0:
+            nifty_tick_age = now_ts - self._last_nifty_time
+
+        # Live Sensex 30 spot & change from INDstocks
+        sensex_spot, sensex_chg_pct, sensex_tick_age = self._fetch_sensex_quote()
+
+        # Determine overall data status: OK | PARTIAL | STALE
+        max_tick_age = max(sensex_tick_age, nifty_tick_age)
+        if max_tick_age > 15.0 or (parsed_spot is None and sensex_spot is None):
+            data_status = "STALE"
+        elif parsed_spot is not None and sensex_spot is not None and full_adv is not None and full_dec is not None:
+            data_status = "OK"
+        else:
+            data_status = "PARTIAL"
 
         return {
             "timestamp": datetime.datetime.now(tz=IST).isoformat(),
+            "data_status": data_status,
+            "tick_age": round(max_tick_age, 1) if max_tick_age < 900 else None,
+            "fetch_time": now_ts,
             "market_status": market_state.get("marketStatus", "Open"),
             "trade_date": market_state.get("tradeDate", ""),
             "nifty_spot": parsed_spot,
-            "nifty_change": round(float(live_change), 2),
-            "nifty_change_pct": round(float(live_change_pct), 2),
+            "nifty_previous_close": p_close,
+            "nifty_change": live_change,
+            "nifty_change_pct": live_change_pct,
             "sensex_spot": sensex_spot,
             "sensex_change_pct": sensex_chg_pct,
             "sector_rotation": {
@@ -387,7 +444,7 @@ class NSEBroadMarketFeed:
                 "stock_options_oi": stock_opt_oi,
                 "nifty_futures_price": fut_price,
                 "nifty_futures_basis": fut_basis,
-                "futures_basis_type": "PREMIUM" if fut_basis >= 0 else "DISCOUNT",
+                "futures_basis_type": "PREMIUM" if (fut_basis is not None and fut_basis >= 0) else "DISCOUNT",
                 "nifty_futures_oi": fut_oi,
             },
             "broad_market": {
@@ -397,7 +454,11 @@ class NSEBroadMarketFeed:
                 "declines": full_dec,
                 "unchanged": full_unc,
                 "advance_decline_ratio": full_adr,
-                "sentiment": "BULLISH_DOMINANCE" if full_adr >= 1.4 else ("BEARISH_PRESSURE" if full_adr <= 0.7 else "MIXED_CHOP"),
+                "sentiment": (
+                    "BULLISH_DOMINANCE" if (full_adr is not None and full_adr >= 1.4)
+                    else ("BEARISH_PRESSURE" if (full_adr is not None and full_adr <= 0.7)
+                    else ("MIXED_CHOP" if full_adr is not None else "UNKNOWN"))
+                ),
                 "total_market_volume": total_volume,
                 "total_market_turnover_crores": total_value_cr,
             },
@@ -412,29 +473,29 @@ class NSEBroadMarketFeed:
                 },
                 "nifty_500": {
                     "name": "NIFTY 500 (96% Institutional Capital)",
-                    "advances": int(nifty_500.get("advances") or n500_adv),
-                    "declines": int(nifty_500.get("declines") or n500_dec),
-                    "unchanged": int(nifty_500.get("unchanged") or n500_unc),
-                    "ltp": float(nifty_500.get("last") or 23410.0),
+                    "advances": int(nifty_500["advances"]) if nifty_500.get("advances") is not None else (n500_adv if n500_adv > 0 else None),
+                    "declines": int(nifty_500["declines"]) if nifty_500.get("declines") is not None else (n500_dec if n500_dec > 0 else None),
+                    "unchanged": int(nifty_500["unchanged"]) if nifty_500.get("unchanged") is not None else (n500_unc if n500_unc > 0 else None),
+                    "ltp": float(nifty_500["last"]) if nifty_500.get("last") is not None else None,
                 },
                 "nifty_50": {
                     "name": "NIFTY 50 (Benchmark Bluechips)",
-                    "advances": int(nifty_50.get("advances") or n50_adv),
-                    "declines": int(nifty_50.get("declines") or n50_dec),
+                    "advances": int(nifty_50["advances"]) if nifty_50.get("advances") is not None else (n50_adv if n50_adv > 0 else None),
+                    "declines": int(nifty_50["declines"]) if nifty_50.get("declines") is not None else (n50_dec if n50_dec > 0 else None),
                     "unchanged": int(nifty_50.get("unchanged", 0)),
-                    "ltp": float(nifty_50.get("last") or parsed_spot),
+                    "ltp": float(nifty_50.get("last") or parsed_spot) if (nifty_50.get("last") or parsed_spot) else None,
                 },
                 "nifty_midcap": {
                     "name": "NIFTY Midcap 150",
-                    "advances": int(nifty_mid.get("advances") or mid_adv),
-                    "declines": int(nifty_mid.get("declines") or mid_dec),
-                    "unchanged": int(nifty_mid.get("unchanged") or mid_unc),
+                    "advances": int(nifty_mid["advances"]) if nifty_mid.get("advances") is not None else (mid_adv if mid_adv > 0 else None),
+                    "declines": int(nifty_mid["declines"]) if nifty_mid.get("declines") is not None else (mid_dec if mid_dec > 0 else None),
+                    "unchanged": int(nifty_mid["unchanged"]) if nifty_mid.get("unchanged") is not None else (mid_unc if mid_unc > 0 else None),
                 },
                 "nifty_smallcap": {
                     "name": "NIFTY Smallcap 250",
-                    "advances": int(nifty_small.get("advances") or small_adv),
-                    "declines": int(nifty_small.get("declines") or small_dec),
-                    "unchanged": int(nifty_small.get("unchanged") or small_unc),
+                    "advances": int(nifty_small["advances"]) if nifty_small.get("advances") is not None else (small_adv if small_adv > 0 else None),
+                    "declines": int(nifty_small["declines"]) if nifty_small.get("declines") is not None else (small_dec if small_dec > 0 else None),
+                    "unchanged": int(nifty_small["unchanged"]) if nifty_small.get("unchanged") is not None else (small_unc if small_unc > 0 else None),
                 },
             },
         }

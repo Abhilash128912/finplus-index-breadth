@@ -352,40 +352,190 @@ class MarketRegimeEngine:
         """
         Synthesizes exchange-wide (2,266 stocks) breadth and benchmark constituent data
         to produce actionable intraday directives for equities and options trading.
+        Strictly enforces:
+        If nifty_spot, sensex_spot or breadth data is None or older than 15s:
+        set regime = UNKNOWN, do not flip the regime, do not send flip alerts,
+        and expose data_status in the regime API. Zero fabricated fallbacks.
         """
         now = now_dt or datetime.datetime.now(tz=IST)
 
+        # Extract spot prices (None if missing or invalid)
+        nifty_spot_raw = broad_market.get("nifty_spot") if broad_market else None
+        if nifty_spot_raw is None and nifty_breadth:
+            nifty_spot_raw = nifty_breadth.get("spot_price")
+        nifty_spot = float(nifty_spot_raw) if (nifty_spot_raw is not None and float(nifty_spot_raw) > 0) else None
+
+        sensex_spot_raw = broad_market.get("sensex_spot") if broad_market else None
+        if sensex_spot_raw is None and sensex_breadth:
+            sensex_spot_raw = sensex_breadth.get("spot_price")
+        sensex_spot = float(sensex_spot_raw) if (sensex_spot_raw is not None and float(sensex_spot_raw) > 0) else None
+
+        nifty_chg = float(broad_market.get("nifty_change_pct")) if (broad_market and broad_market.get("nifty_change_pct") is not None) else (float(nifty_breadth.get("change_pct", 0.0)) if nifty_breadth else 0.0)
+        sensex_chg = float(broad_market.get("sensex_change_pct")) if (broad_market and broad_market.get("sensex_change_pct") is not None) else (float(sensex_breadth.get("change_pct", 0.0)) if sensex_breadth else 0.0)
+
+        # Inspect tick age and data status
+        tick_age: Optional[float] = None
+        if broad_market and "tick_age" in broad_market:
+            try:
+                tick_age = float(broad_market["tick_age"])
+            except (ValueError, TypeError):
+                tick_age = None
+
+        raw_data_status = broad_market.get("data_status") if broad_market else None
+
+        # Check breadth data validity
+        bm_data = broad_market.get("broad_market") if broad_market else None
+        has_breadth = (
+            bool(broad_market) and
+            isinstance(bm_data, dict) and
+            bm_data.get("advances") is not None and
+            bm_data.get("declines") is not None and
+            bool(nifty_breadth) and
+            nifty_breadth.get("status") != "NO_DATA"
+        )
+
+        is_stale = (tick_age is not None and tick_age > 15.0) or (raw_data_status == "STALE")
+        is_missing = (
+            nifty_spot is None or
+            sensex_spot is None or
+            not has_breadth
+        )
+
+        # Time-of-day BTST status
+        hour = now.hour
+        minute = now.minute
+        is_weekday = now.weekday() < 5
+        is_btst_window = (is_weekday and hour == 15 and 10 <= minute <= 30)
+        if is_btst_window:
+            btst_time_status = "ACTIVE_NOW (3:10 - 3:30 PM IST)"
+        elif hour < 15 or (hour == 15 and minute < 10):
+            btst_time_status = "STANDBY (Activates 3:10 PM - 3:30 PM IST)"
+        else:
+            btst_time_status = "MARKET CLOSED (Overnight Session)"
+
+        # -------------------------------------------------------------
+        # GUARD: STALE OR MISSING DATA -> REGIME = UNKNOWN, ZERO ALERTS, ZERO FLIPS
+        # -------------------------------------------------------------
+        if is_stale or is_missing:
+            resolved_status = "STALE" if is_stale else "PARTIAL"
+            trend_code = "UNKNOWN"
+            trend_label = "UNKNOWN (NO RELIABLE DATA)"
+            score = 0
+            trend_color = "gray"
+            trend_description = (
+                f"Market tick or breadth data is {'stale (>15s)' if is_stale else 'incomplete/unavailable'} "
+                f"(Status: {resolved_status}, Tick Age: {tick_age}s). Preserving capital with strict UNKNOWN regime."
+            )
+            equity_action = "AVOID TRADING / NO RELIABLE DATA"
+            equity_badge = "NO TRADE (UNKNOWN)"
+            equity_color = "gray"
+            equity_guidance = "Live market tick or breadth data is unavailable or stale (>15s). Preserving capital."
+
+            option_action = "DO NOT BUY OPTIONS (NO RELIABLE DATA)"
+            option_badge = "NO TRADE (UNKNOWN)"
+            option_color = "gray"
+            option_guidance = "Index spot or breadth feed is stale or missing. Do not trade options on stale data."
+
+            mgr = cls.get_state_manager()
+            # Do NOT flip regime, retain existing state, no alerts
+            regime_step = {
+                "current_regime": mgr.current_regime,
+                "raw_zone": "UNKNOWN",
+                "pending_candidate": mgr.pending_candidate,
+                "pending_count": mgr.pending_count,
+                "last_alerted_regime": mgr.last_alerted_regime,
+                "last_alert_time": mgr.last_alert_time,
+                "should_alert": False,
+                "alert_reason": "",
+                "suppression_reason": f"DATA_{resolved_status}",
+                "transition": {},
+                "regime_flipped": False,
+            }
+
+            bm_adv = bm_data.get("advances") if bm_data else None
+            bm_dec = bm_data.get("declines") if bm_data else None
+            bm_adr = bm_data.get("advance_decline_ratio") if bm_data else None
+
+            vix_info = broad_market.get("vix", {}) if broad_market else {}
+            deriv_info = broad_market.get("derivatives", {}) if broad_market else {}
+            vix_val = vix_info.get("value")
+            pcr_val = deriv_info.get("index_options_pcr")
+
+            return {
+                "timestamp": now.isoformat(),
+                "data_status": resolved_status,
+                "regime": trend_code,
+                "trend": {
+                    "code": trend_code,
+                    "label": trend_label,
+                    "score": score,
+                    "score_label": "-- / 100",
+                    "color": trend_color,
+                    "description": trend_description,
+                    "is_divergence": False,
+                },
+                "equities_directive": {
+                    "action": equity_action,
+                    "badge": equity_badge,
+                    "color": equity_color,
+                    "guidance": equity_guidance,
+                },
+                "options_directive": {
+                    "action": option_action,
+                    "badge": option_badge,
+                    "color": option_color,
+                    "guidance": option_guidance,
+                },
+                "btst_status": btst_time_status,
+                "metrics": {
+                    "nifty_spot": nifty_spot,
+                    "nifty_change_pct": nifty_chg,
+                    "sensex_spot": sensex_spot,
+                    "sensex_change_pct": sensex_chg,
+                    "advance_decline_ratio": bm_adr,
+                    "broad_market_advances": bm_adv,
+                    "broad_market_declines": bm_dec,
+                    "nifty_heavyweights_above_vwap": "0/5",
+                    "vix_value": vix_val,
+                    "options_pcr": pcr_val,
+                },
+                "regime_step": regime_step,
+                "should_alert": False,
+                "alert_reason": "",
+                "suppression_reason": f"DATA_{resolved_status}",
+                "transition": {},
+                "confirmed_regime": "UNKNOWN",
+                "raw_score": 0,
+            }
+
+        resolved_status = raw_data_status or "OK"
+
         # Extract Benchmark metrics
-        nifty_wabi = nifty_breadth.get("wabi_score", 0.0)
-        sensex_wabi = sensex_breadth.get("wabi_score", 0.0)
-        nifty_above_pct = nifty_breadth.get("stocks_above_vwap_pct", 0.0)
-        nifty_thrust = nifty_breadth.get("volume_thrust_pct", 50.0)
+        nifty_wabi = float(nifty_breadth.get("wabi_score", 0.0))
+        sensex_wabi = float(sensex_breadth.get("wabi_score", 0.0))
+        nifty_above_pct = float(nifty_breadth.get("stocks_above_vwap_pct", 0.0))
+        nifty_thrust = float(nifty_breadth.get("volume_thrust_pct", 50.0))
         nifty_hw = nifty_breadth.get("heavyweights", {})
         nifty_hw_above = sum(1 for v in nifty_hw.values() if v == "ABOVE_VWAP")
-        nifty_spot = float(broad_market.get("nifty_spot", 24925.0)) if broad_market else 24925.0
-        nifty_chg = broad_market.get("nifty_change_pct", 0.0) if broad_market else 0.0
-        sensex_spot = float(broad_market.get("sensex_spot") or 0.0) if broad_market else 0.0
-        sensex_chg = broad_market.get("sensex_change_pct", 0.0) if broad_market else 0.0
 
-        # Extract Broad Market metrics (All 2,266 NSE Stocks)
-        bm_data = broad_market.get("broad_market", {}) if broad_market else {}
-        bm_adv = bm_data.get("advances", 0)
-        bm_dec = bm_data.get("declines", 0)
-        bm_adr = bm_data.get("advance_decline_ratio", 1.0)
-        bm_total = bm_data.get("total_stocks", 2266)
+        # Extract Broad Market metrics (All NSE Stocks)
+        bm_adv = int(bm_data.get("advances", 0))
+        bm_dec = int(bm_data.get("declines", 0))
+        bm_adr = float(bm_data.get("advance_decline_ratio", 1.0))
+        bm_total = bm_data.get("total_stocks")
 
-        # Extract Segment & Derivatives Confluence
+        # Extract Segment & Derivatives Confluence (Zero fabricated defaults)
         segs = broad_market.get("segments", {}) if broad_market else {}
         n500 = segs.get("nifty_500", {})
-        n500_adv = int(n500.get("advances") or 228)
-        n500_dec = int(n500.get("declines") or 267)
+        n500_adv = int(n500.get("advances")) if n500.get("advances") is not None else 0
+        n500_dec = int(n500.get("declines")) if n500.get("declines") is not None else 0
 
         vix_info = broad_market.get("vix", {}) if broad_market else {}
         deriv_info = broad_market.get("derivatives", {}) if broad_market else {}
-        vix_val = float(vix_info.get("value") or 15.5)
-        vix_chg_pct = float(vix_info.get("change_pct") or 0.0)
-        pcr_val = float(deriv_info.get("index_options_pcr") or 0.85)
-        fut_basis = float(deriv_info.get("nifty_futures_basis") or 0.0)
+        vix_val = float(vix_info["value"]) if vix_info.get("value") is not None else None
+        vix_chg_pct = float(vix_info["change_pct"]) if vix_info.get("change_pct") is not None else 0.0
+        pcr_val = float(deriv_info["index_options_pcr"]) if deriv_info.get("index_options_pcr") is not None else None
+        fut_basis = float(deriv_info["nifty_futures_basis"]) if deriv_info.get("nifty_futures_basis") is not None else None
 
         # -------------------------------------------------------------
         # 1. INSTITUTIONAL COMPOSITE TREND INDEX (CTI) CALCULATION (-100 to +100)
@@ -422,30 +572,33 @@ class MarketRegimeEngine:
             raw_score -= 10.0
 
         # Pillar 3: Derivatives & Volatility Confluence (Max 25 points)
-        if pcr_val >= 1.30:
-            raw_score += 10.0
-        elif pcr_val >= 1.15:
-            raw_score += 5.0
-        elif pcr_val <= 0.70:
-            raw_score -= 10.0
-        elif pcr_val <= 0.85:
-            raw_score -= 5.0
-
-        if nifty_chg >= 0:
-            if vix_val <= 16.0 and vix_chg_pct <= 0:
+        if pcr_val is not None:
+            if pcr_val >= 1.30:
                 raw_score += 10.0
-            elif vix_chg_pct >= 5.0:
+            elif pcr_val >= 1.15:
+                raw_score += 5.0
+            elif pcr_val <= 0.70:
                 raw_score -= 10.0
-        else:
-            if vix_chg_pct >= 5.0:
-                raw_score -= 10.0
-            elif vix_chg_pct <= 0:
+            elif pcr_val <= 0.85:
                 raw_score -= 5.0
 
-        if fut_basis >= 10.0:
-            raw_score += 5.0
-        elif fut_basis <= -15.0:
-            raw_score -= 5.0
+        if vix_val is not None:
+            if nifty_chg >= 0:
+                if vix_val <= 16.0 and vix_chg_pct <= 0:
+                    raw_score += 10.0
+                elif vix_chg_pct >= 5.0:
+                    raw_score -= 10.0
+            else:
+                if vix_chg_pct >= 5.0:
+                    raw_score -= 10.0
+                elif vix_chg_pct <= 0:
+                    raw_score -= 5.0
+
+        if fut_basis is not None:
+            if fut_basis >= 10.0:
+                raw_score += 5.0
+            elif fut_basis <= -15.0:
+                raw_score -= 5.0
 
         score = max(-100, min(100, round(raw_score)))
 
@@ -546,7 +699,9 @@ class MarketRegimeEngine:
         # -------------------------------------------------------------
         # 4. INTRADAY OPTIONS BUYING DIRECTIVE
         # -------------------------------------------------------------
-        vol_note = f" (VIX: {vix_val:.2f}, PCR: {pcr_val:.2f})"
+        vix_str = f"VIX: {vix_val:.2f}" if vix_val is not None else "VIX: N/A"
+        pcr_str = f"PCR: {pcr_val:.2f}" if pcr_val is not None else "PCR: N/A"
+        vol_note = f" ({vix_str}, {pcr_str})"
         if trend_code == "STRONG_UPTREND":
             option_action = "CALL OPTIONS BUYING PERMITTED (HIGH PROBABILITY)"
             option_badge = "BUY CALLS"
@@ -605,6 +760,8 @@ class MarketRegimeEngine:
 
         return {
             "timestamp": now.isoformat(),
+            "data_status": resolved_status,
+            "regime": trend_code,
             "trend": {
                 "code": trend_code,
                 "label": trend_label,
