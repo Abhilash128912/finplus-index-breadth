@@ -381,6 +381,7 @@ class MarketScheduler:
         last_s_t = getattr(self.broad_feed, "_last_sensex_time", 0.0)
         nifty_age = round(now_ts - last_n_t, 1) if last_n_t > 0 else tick_age
         sensex_age = round(now_ts - last_s_t, 1) if last_s_t > 0 else tick_age
+        last_change_at = getattr(self.broad_feed, "last_change_at", {})
 
         ac = getattr(self.broad_feed, "auth_client", None)
         token_gen_ts = getattr(ac, "token_generated_at", None) if ac else None
@@ -391,30 +392,55 @@ class MarketScheduler:
         from src.feeds.nse_broad_market_feed import is_regular_nse_market_open
         is_market_open = is_regular_nse_market_open(now_dt)
 
+        sx_last_chg = last_change_at.get("indstocks_sensex") or fetched_at.get("indstocks_sensex") or now_ts
+        nf_last_chg = last_change_at.get("indstocks_nifty") or fetched_at.get("indstocks_nifty") or now_ts
+
+        if not is_market_open:
+            sx_status = "MARKET_CLOSED"
+            nf_status = "MARKET_CLOSED"
+        else:
+            if sensex_spot is None:
+                sx_status = "UNAVAILABLE"
+            elif (now_ts - sx_last_chg) > 30.0:
+                sx_status = "SUSPECT_FROZEN"
+            else:
+                sx_status = "LIVE"
+
+            if nifty_spot is None:
+                nf_status = "UNAVAILABLE"
+            elif (now_ts - nf_last_chg) > 30.0:
+                nf_status = "SUSPECT_FROZEN"
+            else:
+                nf_status = "LIVE"
+
         sources = {
             "indstocks_sensex": {
                 "value": sensex_spot,
+                "live_price": sensex_spot,
                 "source": "INDSTOCKS",
                 "tick_age": sensex_age if sensex_spot else None,
-                "data_status": "MARKET_CLOSED" if not is_market_open else ("OK" if (sensex_spot and sensex_age <= 15.0) else "STALE"),
+                "data_status": sx_status,
                 "last_success_ts": last_success_ts.get("indstocks_sensex"),
                 "last_error": last_errors.get("indstocks_sensex"),
                 "consecutive_failures": consecutive_failures.get("indstocks_sensex", 0),
                 "token_age_seconds": token_age_s,
                 "exchange_ts": exchange_ts.get("indstocks_sensex"),
                 "fetched_at": fetched_at.get("indstocks_sensex"),
+                "last_change_at": sx_last_chg,
             },
             "indstocks_nifty": {
                 "value": nifty_spot,
+                "live_price": nifty_spot,
                 "source": "INDSTOCKS/NSE",
                 "tick_age": nifty_age if nifty_spot else None,
-                "data_status": "MARKET_CLOSED" if not is_market_open else ("OK" if (nifty_spot and nifty_age <= 15.0) else "STALE"),
+                "data_status": nf_status,
                 "last_success_ts": last_success_ts.get("indstocks_nifty"),
                 "last_error": last_errors.get("indstocks_nifty"),
                 "consecutive_failures": consecutive_failures.get("indstocks_nifty", 0),
                 "token_age_seconds": token_age_s,
                 "exchange_ts": exchange_ts.get("indstocks_nifty"),
                 "fetched_at": fetched_at.get("indstocks_nifty"),
+                "last_change_at": nf_last_chg,
             },
             "nse_breadth": {
                 "value": broad_data if broad_data else None,

@@ -69,6 +69,10 @@ class NTFYDispatcher:
         actions: Optional[str] = None,
     ) -> bool:
         """Sends push notification to registered topics with standard normal font size."""
+        # Strict Test Isolation: Return immediately without any network call when FINPLUS_ENV=test
+        if os.getenv("FINPLUS_ENV") == "test" or os.getenv("FINPLUS_ENVIRONMENT") == "test":
+            return False
+
         # Environment Gate: Block all NTFY sends unless running on Render Cloud
         is_render = bool(os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"))
         if not is_render:

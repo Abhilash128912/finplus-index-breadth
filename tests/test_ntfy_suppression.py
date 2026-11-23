@@ -10,6 +10,8 @@ def test_ntfy_suppression_when_not_on_render(monkeypatch, caplog):
     - Logs 'NTFY suppressed (not on Render)' at most once per hour.
     """
     import logging
+    monkeypatch.delenv("FINPLUS_ENV", raising=False)
+    monkeypatch.delenv("FINPLUS_ENVIRONMENT", raising=False)
     monkeypatch.delenv("RENDER", raising=False)
     monkeypatch.delenv("RENDER_SERVICE_ID", raising=False)
 
@@ -31,6 +33,8 @@ def test_ntfy_suppression_when_not_on_render(monkeypatch, caplog):
 
 def test_ntfy_allowed_when_on_render(monkeypatch):
     """Verifies that NTFY dispatches normally when RENDER is set."""
+    monkeypatch.delenv("FINPLUS_ENV", raising=False)
+    monkeypatch.delenv("FINPLUS_ENVIRONMENT", raising=False)
     monkeypatch.setenv("RENDER", "true")
     dispatcher = NTFYDispatcher()
 
@@ -43,6 +47,8 @@ def test_ntfy_allowed_when_on_render(monkeypatch):
 def test_regime_flip_suppressed_outside_market_hours(monkeypatch):
     """Verifies that regime flip alerts are strictly blocked outside Mon-Fri 09:15-15:30 IST."""
     import datetime
+    monkeypatch.delenv("FINPLUS_ENV", raising=False)
+    monkeypatch.delenv("FINPLUS_ENVIRONMENT", raising=False)
     monkeypatch.setenv("RENDER", "true")
     dispatcher = NTFYDispatcher()
 

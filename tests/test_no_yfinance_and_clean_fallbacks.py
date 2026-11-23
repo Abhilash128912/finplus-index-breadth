@@ -109,8 +109,8 @@ def test_regime_unknown_when_nifty_spot_is_none(tmp_path):
     assert mgr.current_regime == "UPTREND"
 
 
-def test_regime_unknown_when_sensex_spot_is_none(tmp_path):
-    """When sensex_spot is None, regime must be UNKNOWN and alerts suppressed."""
+def test_regime_calculates_when_sensex_spot_is_none(tmp_path):
+    """When sensex_spot is None, regime calculates from Nifty + breadth, with status PARTIAL."""
     state_file = tmp_path / "regime_state.json"
     mgr = MarketRegimeEngine.reset_state_manager(state_file=state_file)
     mgr.current_regime = "STRONG_UPTREND"
@@ -128,11 +128,9 @@ def test_regime_unknown_when_sensex_spot_is_none(tmp_path):
 
     res = MarketRegimeEngine.evaluate_regime(nifty_breadth, sensex_breadth, broad_market=broad_market)
 
-    assert res["regime"] == "UNKNOWN"
-    assert res["trend"]["code"] == "UNKNOWN"
+    assert res["regime"] != "UNKNOWN"
     assert res["data_status"] == "PARTIAL"
-    assert res["should_alert"] is False
-    assert mgr.current_regime == "STRONG_UPTREND"
+    assert res["metrics"]["sensex_spot"] is None
 
 
 def test_regime_unknown_when_breadth_data_is_none(tmp_path):
@@ -349,9 +347,9 @@ def test_stale_exchange_timestamp_marks_stale(monkeypatch):
 
     class MockOldResp:
         status_code = 200
-        headers = {"Date": old_date_hdr}
+        headers = {}
         def json(self):
-            return {"status": "success", "data": {"BIDX_40000006": {"live_price": 82100.0, "day_change_percentage": 0.2}}}
+            return {"status": "success", "data": {"BIDX_40000006": {"live_price": 82100.0, "day_change_percentage": 0.2, "timestamp": old_time}}}
 
     monkeypatch.setattr(requests, "get", lambda *args, **kwargs: MockOldResp())
 
@@ -369,37 +367,93 @@ def test_error_returns_none_with_no_cached_value(monkeypatch):
     from finplus_index_breadth.feeds.nse_broad_market_feed import NSEBroadMarketFeed
 
     feed = NSEBroadMarketFeed()
-
-    # Seed previous successful quote
     feed.last_success_ts["indstocks_sensex"] = 1000.0
+    feed.exchange_ts["indstocks_sensex"] = 1795000000.0  # Old timestamp
 
     class MockErrResp:
-        status_code = 500
+        status_code = 403
         headers = {}
-        text = "Internal Server Error"
+        text = "Forbidden"
         def json(self):
-            return {}
+            return {"message": "Invalid token", "success": False}
 
     monkeypatch.setattr(requests, "get", lambda *args, **kwargs: MockErrResp())
 
     res = feed._fetch_indstocks_quote("BIDX_40000006")
     assert res.spot is None
     assert res.change_pct is None
-    assert feed.last_errors["indstocks_sensex"] == "HTTP 500"
+    assert res.exchange_ts is None
+    assert feed.exchange_ts["indstocks_sensex"] is None  # Cleared on HTTP error!
+    assert feed.last_errors["indstocks_sensex"] == "HTTP 403"
     assert feed.consecutive_failures["indstocks_sensex"] >= 1
 
 
-def test_outside_market_hours_marks_market_closed(monkeypatch):
+def test_freeze_detector_unchanged_price_marks_suspect_frozen(monkeypatch):
     """
-    Requirement 6: Outside market hours, mark MARKET_CLOSED, not STALE.
+    Requirement 1d: During market hours, if live_price is unchanged for > 30s (e.g. 31s),
+    data_status must be SUSPECT_FROZEN and spot is None (treated like STALE: no signals).
     """
-    import requests
+    import requests, time
     from finplus_index_breadth.feeds.nse_broad_market_feed import NSEBroadMarketFeed
     import finplus_index_breadth.feeds.nse_broad_market_feed as feed_module
 
     feed = NSEBroadMarketFeed()
+    feed.last_known_price["indstocks_sensex"] = 83000.0
+    now = time.time()
+    feed.last_change_at["indstocks_sensex"] = now - 31.0  # Unchanged for 31s
 
-    # Mock market hours = CLOSED
+    monkeypatch.setattr(feed_module, "is_regular_nse_market_open", lambda *args, **kwargs: True)
+
+    class MockResp:
+        status_code = 200
+        headers = {}
+        def json(self):
+            return {"status": "success", "data": {"BIDX_40000006": {"live_price": 83000.0, "day_change_percentage": 0.5}}}
+
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: MockResp())
+
+    res = feed._fetch_indstocks_quote("BIDX_40000006")
+    assert res.data_status == "SUSPECT_FROZEN"
+    assert res.spot is None, "SUSPECT_FROZEN must return spot None (treated like STALE)"
+
+
+def test_freeze_detector_changing_price_marks_live(monkeypatch):
+    """
+    Requirement 1d: During market hours, if live_price changes,
+    data_status must be LIVE and spot is returned.
+    """
+    import requests, time
+    from finplus_index_breadth.feeds.nse_broad_market_feed import NSEBroadMarketFeed
+    import finplus_index_breadth.feeds.nse_broad_market_feed as feed_module
+
+    feed = NSEBroadMarketFeed()
+    feed.last_known_price["indstocks_sensex"] = 83000.0
+    feed.last_change_at["indstocks_sensex"] = time.time() - 40.0
+
+    monkeypatch.setattr(feed_module, "is_regular_nse_market_open", lambda *args, **kwargs: True)
+
+    class MockResp:
+        status_code = 200
+        headers = {}
+        def json(self):
+            return {"status": "success", "data": {"BIDX_40000006": {"live_price": 83050.0, "day_change_percentage": 0.6}}}
+
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: MockResp())
+
+    res = feed._fetch_indstocks_quote("BIDX_40000006")
+    assert res.data_status == "LIVE"
+    assert res.spot == 83050.0
+
+
+def test_outside_market_hours_marks_market_closed(monkeypatch):
+    """
+    Requirement 1d: Outside market hours, mark MARKET_CLOSED.
+    """
+    import requests, time
+    from finplus_index_breadth.feeds.nse_broad_market_feed import NSEBroadMarketFeed
+    import finplus_index_breadth.feeds.nse_broad_market_feed as feed_module
+
+    feed = NSEBroadMarketFeed()
     monkeypatch.setattr(feed_module, "is_regular_nse_market_open", lambda *args, **kwargs: False)
 
     class MockOkResp:
@@ -412,4 +466,73 @@ def test_outside_market_hours_marks_market_closed(monkeypatch):
 
     res = feed._fetch_indstocks_quote("BIDX_40000006")
     assert res.data_status == "MARKET_CLOSED"
+
+
+def test_http_error_yields_unavailable_with_value_none(monkeypatch):
+    """
+    Requirement 1d: On HTTP error during market hours, return UNAVAILABLE with value None.
+    """
+    import requests
+    from finplus_index_breadth.feeds.nse_broad_market_feed import NSEBroadMarketFeed
+    import finplus_index_breadth.feeds.nse_broad_market_feed as feed_module
+
+    feed = NSEBroadMarketFeed()
+    monkeypatch.setattr(feed_module, "is_regular_nse_market_open", lambda *args, **kwargs: True)
+
+    class MockErrResp:
+        status_code = 502
+        headers = {}
+        text = "Bad Gateway"
+        def json(self):
+            return {"message": "Bad Gateway", "success": False}
+
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: MockErrResp())
+
+    res = feed._fetch_indstocks_quote("BIDX_40000006")
+    assert res.spot is None
+    assert res.data_status == "UNAVAILABLE"
+
+
+def test_sensex_failure_does_not_mark_broad_market_stale(monkeypatch):
+    """
+    Sensex failure (e.g. HTTP 403 on BIDX_40000006) must mark broad market status as
+    PARTIAL, never STALE, as long as Nifty and NSE breadth are active.
+    """
+    import requests, time
+    from finplus_index_breadth.feeds.nse_broad_market_feed import NSEBroadMarketFeed
+    import finplus_index_breadth.feeds.nse_broad_market_feed as feed_module
+
+    feed = NSEBroadMarketFeed()
+    monkeypatch.setattr(feed_module, "is_regular_nse_market_open", lambda *args, **kwargs: True)
+
+    # Mock Sensex 403 failure
+    def mock_fetch_sensex():
+        from finplus_index_breadth.feeds.nse_broad_market_feed import QuoteResult
+        return QuoteResult(None, None, 999.0, data_status="UNAVAILABLE")
+
+    monkeypatch.setattr(feed, "_fetch_sensex_quote", mock_fetch_sensex)
+
+    # Mock NSE broad market return
+    now = time.time()
+    feed._cached_nifty_spot = 25500.0
+    feed._last_nifty_time = now
+
+    def mock_get(url, *args, **kwargs):
+        class MockNse:
+            status_code = 200
+            headers = {}
+            def json(self):
+                if "allIndices" in url:
+                    return {"data": [{"index": "NIFTY 50", "last": 25500.0, "variation": 50.0, "percentChange": 0.2}]}
+                return {"advances": 300, "declines": 700, "unchanged": 50}
+        return MockNse()
+
+    monkeypatch.setattr(feed.session, "get", mock_get)
+
+    res = feed.fetch_broad_market_breadth()
+    # Broad market status must be PARTIAL (not STALE)
+    assert res["data_status"] == "PARTIAL"
+    assert res["sensex_spot"] is None
+    assert res["nifty_spot"] == 25500.0
+
 

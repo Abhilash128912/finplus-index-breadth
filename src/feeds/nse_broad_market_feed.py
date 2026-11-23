@@ -41,6 +41,7 @@ class QuoteResult(tuple):
         data_status: str = "OK",
         exchange_ts: Optional[float] = None,
         fetched_at: Optional[float] = None,
+        last_change_at: Optional[float] = None,
     ):
         return super().__new__(cls, (spot, change_pct, tick_age))
 
@@ -53,6 +54,7 @@ class QuoteResult(tuple):
         data_status: str = "OK",
         exchange_ts: Optional[float] = None,
         fetched_at: Optional[float] = None,
+        last_change_at: Optional[float] = None,
     ):
         self.spot = spot
         self.change_pct = change_pct
@@ -61,6 +63,7 @@ class QuoteResult(tuple):
         self.data_status = data_status
         self.exchange_ts = exchange_ts
         self.fetched_at = fetched_at
+        self.last_change_at = last_change_at
 
     def __bool__(self) -> bool:
         return self[0] is not None
@@ -76,6 +79,8 @@ class QuoteResult(tuple):
             return self.exchange_ts
         if key == "fetched_at":
             return self.fetched_at
+        if key == "last_change_at":
+            return self.last_change_at
         return self.raw_dict.get(key, default)
 
     def __getitem__(self, item: Any) -> Any:
@@ -148,6 +153,18 @@ class NSEBroadMarketFeed:
             "nse_breadth": None,
             "vix": None,
         }
+        self.last_change_at: Dict[str, Optional[float]] = {
+            "indstocks_sensex": None,
+            "indstocks_nifty": None,
+            "nse_breadth": None,
+            "vix": None,
+        }
+        self.last_known_price: Dict[str, Optional[float]] = {
+            "indstocks_sensex": None,
+            "indstocks_nifty": None,
+            "nse_breadth": None,
+            "vix": None,
+        }
 
     def _fetch_indstocks_quote(self, scrip_code: str) -> QuoteResult:
         """
@@ -176,7 +193,7 @@ class NSEBroadMarketFeed:
             if self.auth_client is None:
                 try:
                     from finplus_core.auth import INDMoneyAuthClient
-                    self.auth_client = INDMoneyAuthClient()
+                    self.auth_client = INDMoneyAuthClient(auth_role="client")
                 except Exception as auth_err:
                     logger.debug("Auth client init notice: %s", auth_err)
 
@@ -197,7 +214,7 @@ class NSEBroadMarketFeed:
                 resp = requests.get(url, headers=headers, timeout=2.5)
                 if resp.status_code in (401, 403) and self.auth_client:
                     try:
-                        self.auth_client.get_valid_token(auto_refresh=False)
+                        self.auth_client.get_valid_token(auto_refresh=True)
                         headers = self.auth_client.get_auth_headers()
                         resp = requests.get(url, headers=headers, timeout=2.5)
                     except Exception:
@@ -209,33 +226,35 @@ class NSEBroadMarketFeed:
                     p = float(data.get("live_price") or 0.0)
                     chg = float(data.get("day_change_percentage") or 0.0)
                     if p > 0:
-                        # Extract exchange timestamp from response
+                        # Extract exchange timestamp if present in quote payload (never substitute fetched_at)
                         exchange_ts = None
                         raw_ts = data.get("timestamp") or data.get("last_traded_time") or data.get("ltt") or data.get("trade_time")
-                        if raw_ts:
+                        if raw_ts is not None:
                             try:
                                 raw_flt = float(raw_ts)
                                 exchange_ts = raw_flt / 1000.0 if raw_flt > 1e11 else raw_flt
                             except Exception:
-                                pass
-                        if exchange_ts is None:
-                            date_hdr = resp.headers.get("Date")
-                            if date_hdr:
-                                try:
-                                    exchange_ts = parsedate_to_datetime(date_hdr).timestamp()
-                                except Exception:
-                                    exchange_ts = fetched_at
-                            else:
-                                exchange_ts = fetched_at
+                                exchange_ts = None
 
-                        tick_age = max(0.0, round(fetched_at - exchange_ts, 1))
+                        self.fetched_at[src_key] = fetched_at
+
+                        # Track last price change for Freeze Detector
+                        prev_p = self.last_known_price.get(src_key)
+                        if prev_p is None or abs(p - prev_p) > 1e-4:
+                            self.last_known_price[src_key] = p
+                            self.last_change_at[src_key] = fetched_at
+                        last_chg = self.last_change_at.get(src_key, fetched_at)
+
+                        tick_age = max(0.0, round(fetched_at - exchange_ts, 1)) if exchange_ts else None
 
                         if not is_market_open:
                             data_status = "MARKET_CLOSED"
-                        elif tick_age > 15.0:
+                        elif exchange_ts is not None and (fetched_at - exchange_ts) > 15.0:
                             data_status = "STALE"
+                        elif (fetched_at - last_chg) > 30.0:
+                            data_status = "SUSPECT_FROZEN"
                         else:
-                            data_status = "OK"
+                            data_status = "LIVE"
 
                         # Update telemetry counters
                         self.last_success_ts[src_key] = fetched_at
@@ -244,11 +263,23 @@ class NSEBroadMarketFeed:
                         self.consecutive_failures[src_key] = 0
                         self.exchange_ts[src_key] = exchange_ts
                         self.fetched_at[src_key] = fetched_at
+                        self._quote_time[scrip_code] = fetched_at
+                        self._quote_cache[scrip_code] = data
 
-                        if data_status == "STALE":
-                            return QuoteResult(None, None, tick_age, raw_dict=data, data_status="STALE", exchange_ts=exchange_ts, fetched_at=fetched_at)
+                        # Treat STALE or SUSPECT_FROZEN: no signals, return None
+                        ret_p = round(p, 2) if data_status not in ("STALE", "SUSPECT_FROZEN", "UNAVAILABLE") else None
+                        ret_chg = round(chg, 2) if data_status not in ("STALE", "SUSPECT_FROZEN", "UNAVAILABLE") else 0.0
 
-                        return QuoteResult(round(p, 2), round(chg, 2), tick_age, raw_dict=data, data_status=data_status, exchange_ts=exchange_ts, fetched_at=fetched_at)
+                        return QuoteResult(
+                            ret_p,
+                            ret_chg,
+                            tick_age if tick_age is not None else 0.0,
+                            raw_dict=data,
+                            data_status=data_status,
+                            exchange_ts=exchange_ts,
+                            fetched_at=fetched_at,
+                            last_change_at=last_chg,
+                        )
                     else:
                         err_msg = f"Zero/empty live_price for {scrip_code}"
                 else:
@@ -259,13 +290,15 @@ class NSEBroadMarketFeed:
             err_msg = str(e)
             logger.debug("INDstocks quote fetch notice for %s: %s", scrip_code, e)
 
-        # On any failure: Record error and return None (ZERO cached fallback)
+        # On any failure: Record error and clear value AND exchange_ts (both None) so no old timestamp survives
         self.consecutive_failures[src_key] = self.consecutive_failures.get(src_key, 0) + 1
         self.last_errors[src_key] = err_msg
         self.last_errors["indstocks_quotes"] = err_msg
+        self.exchange_ts[src_key] = None
         self.fetched_at[src_key] = fetched_at
-        status = "MARKET_CLOSED" if not is_market_open else "ERROR"
-        return QuoteResult(None, None, 999.0, raw_dict=None, data_status=status, exchange_ts=None, fetched_at=fetched_at)
+        status = "MARKET_CLOSED" if not is_market_open else "UNAVAILABLE"
+        age = (fetched_at - self._quote_time[scrip_code]) if scrip_code in self._quote_time else 999.0
+        return QuoteResult(None, None, age, raw_dict=None, data_status=status, exchange_ts=None, fetched_at=fetched_at, last_change_at=self.last_change_at.get(src_key))
 
     def _fetch_sensex_quote(self) -> QuoteResult:
         """
@@ -594,13 +627,17 @@ class NSEBroadMarketFeed:
         sensex_spot, sensex_chg_pct, sensex_tick_age = self._fetch_sensex_quote()
 
         # Determine overall data status: OK | PARTIAL | STALE | MARKET_CLOSED
+        # Nifty spot and NSE broad market breadth are the core primary market signals.
+        # Sensex is an auxiliary benchmark: an outage in Sensex spot must NEVER stale the primary market feed.
         is_market_open = is_regular_nse_market_open()
-        max_tick_age = max(sensex_tick_age, nifty_tick_age)
+        primary_tick_age = nifty_tick_age
+        has_breadth_data = (full_adv is not None and full_dec is not None)
+
         if not is_market_open:
             data_status = "MARKET_CLOSED"
-        elif max_tick_age > 15.0 or (parsed_spot is None and sensex_spot is None):
+        elif parsed_spot is None or primary_tick_age > 15.0 or not has_breadth_data:
             data_status = "STALE"
-        elif parsed_spot is not None and sensex_spot is not None and full_adv is not None and full_dec is not None:
+        elif sensex_spot is not None and sensex_tick_age <= 15.0:
             data_status = "OK"
         else:
             data_status = "PARTIAL"
@@ -608,7 +645,7 @@ class NSEBroadMarketFeed:
         return {
             "timestamp": datetime.datetime.now(tz=IST).isoformat(),
             "data_status": data_status,
-            "tick_age": round(max_tick_age, 1) if max_tick_age < 900 else None,
+            "tick_age": round(primary_tick_age, 1) if primary_tick_age < 900 else None,
             "last_errors": dict(self.last_errors),
             "fetch_time": now_ts,
             "market_status": market_state.get("marketStatus", "Open"),

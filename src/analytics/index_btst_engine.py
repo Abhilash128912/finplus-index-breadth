@@ -206,8 +206,19 @@ class IndexBTSTEngine:
         nifty_contract = compute_atm_option(nifty_spot, "NIFTY") if (is_qualified and nifty_spot) else None
         sensex_contract = compute_atm_option(sensex_spot, "SENSEX") if (is_qualified and sensex_spot) else None
 
-        preferred_index = ("NIFTY 50" if nifty_wabi >= sensex_wabi else "SENSEX 30") if is_qualified else "NONE (HOLD 100% CASH)"
-        primary_contract = (nifty_contract if preferred_index == "NIFTY 50" else sensex_contract) if is_qualified else None
+        if is_qualified:
+            if sensex_contract is not None and sensex_wabi > nifty_wabi:
+                preferred_index = "SENSEX 30"
+                primary_contract = sensex_contract
+            elif nifty_contract is not None:
+                preferred_index = "NIFTY 50"
+                primary_contract = nifty_contract
+            else:
+                preferred_index = "NONE (HOLD 100% CASH)"
+                primary_contract = None
+        else:
+            preferred_index = "NONE (HOLD 100% CASH)"
+            primary_contract = None
 
         return {
             "status": "BTST_QUALIFIED" if is_qualified else "NO_TRADE",

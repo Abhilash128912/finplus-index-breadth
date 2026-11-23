@@ -379,7 +379,7 @@
               EVALUATING...
             </span>
           </div>
-          <div class="text-xs text-slate-400 mt-0.5">Spot: <b id="nifty-spot-val" class="text-white mono">--</b> (<span id="nifty-change-val" class="text-slate-400 font-bold">--</span>)</div>
+          <div class="text-xs text-slate-400 mt-0.5">Spot: <b id="nifty-spot-val" class="text-white mono">--</b> (<span id="nifty-change-val" class="text-slate-400 font-bold">--</span>) <span id="nifty-status-badge" class="ml-1 text-[10px] px-1.5 py-0.5 rounded font-mono font-bold hidden"></span></div>
         </div>
         <div class="text-right">
           <div id="nifty-wabi-val" class="text-2xl font-black mono text-slate-400">--</div>
@@ -429,7 +429,7 @@
               30 BLUECHIPS
             </span>
           </div>
-          <div class="text-xs text-slate-400 mt-0.5">Spot: <b id="sensex-spot-val" class="text-white mono">--</b> (<span id="sensex-change-val" class="text-slate-400 font-bold">--</span>)</div>
+          <div class="text-xs text-slate-400 mt-0.5">Spot: <b id="sensex-spot-val" class="text-white mono">--</b> (<span id="sensex-change-val" class="text-slate-400 font-bold">--</span>) <span id="sensex-status-badge" class="ml-1 text-[10px] px-1.5 py-0.5 rounded font-mono font-bold hidden"></span></div>
         </div>
         <div class="text-right">
           <div id="sensex-wabi-val" class="text-2xl font-black mono text-slate-400">--</div>
@@ -928,16 +928,46 @@
         nRegimeBadge.className = `text-xs px-2 py-0.5 rounded font-mono font-bold ${wabi >= 0 ? 'bg-emerald-950/80 border border-emerald-500/40 text-emerald-300' : 'bg-rose-950/80 border border-rose-500/40 text-rose-300'}`;
       }
 
-      // Live Spot & Change
-      if (data.broad_market && data.broad_market.nifty_spot) {
+      // Live Spot & Change & Fail-Loudly Badges
+      const bmDataStatus = data.broad_market?.data_status || (data.market_regime?.data_status) || 'UNAVAILABLE';
+      function renderIndexBadge(badgeId, st) {
+        const badge = document.getElementById(badgeId);
+        if (!badge) return;
+        badge.className = 'ml-1 text-[10px] px-1.5 py-0.5 rounded font-mono font-bold border';
+        if (st === 'STALE') {
+          badge.textContent = 'STALE';
+          badge.classList.add('bg-amber-950', 'text-amber-300', 'border-amber-600/40');
+        } else if (st === 'MARKET_CLOSED') {
+          badge.textContent = 'MARKET CLOSED';
+          badge.classList.add('bg-blue-950', 'text-blue-300', 'border-blue-600/40');
+        } else if (st === 'UNAVAILABLE' || st === 'ERROR') {
+          badge.textContent = 'UNAVAILABLE';
+          badge.classList.add('bg-rose-950', 'text-rose-300', 'border-rose-600/40');
+        } else {
+          badge.textContent = 'LIVE';
+          badge.classList.add('bg-emerald-950', 'text-emerald-300', 'border-emerald-600/40');
+        }
+      }
+      renderIndexBadge('nifty-status-badge', bmDataStatus);
+      renderIndexBadge('sensex-status-badge', bmDataStatus);
+
+      const nSpotVal = document.getElementById('nifty-spot-val');
+      const nSpotRef = document.getElementById('nifty-spot-ref');
+      const futSpotRef = document.getElementById('fut-spot-ref');
+      if (bmDataStatus === 'STALE') {
+        if (nSpotVal) nSpotVal.textContent = '-- (STALE)';
+        if (nSpotRef) nSpotRef.textContent = '-- (STALE)';
+        if (futSpotRef) futSpotRef.textContent = '-- (STALE)';
+      } else if (data.broad_market && data.broad_market.nifty_spot) {
         const spotNum = Number(data.broad_market.nifty_spot);
         const spotFormatted = spotNum.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-        const nSpotVal = document.getElementById('nifty-spot-val');
         if (nSpotVal) nSpotVal.textContent = spotFormatted;
-        const nSpotRef = document.getElementById('nifty-spot-ref');
         if (nSpotRef) nSpotRef.textContent = spotFormatted;
-        const futSpotRef = document.getElementById('fut-spot-ref');
         if (futSpotRef) futSpotRef.textContent = spotFormatted;
+      } else {
+        if (nSpotVal) nSpotVal.textContent = '--';
+        if (nSpotRef) nSpotRef.textContent = '--';
+        if (futSpotRef) futSpotRef.textContent = '--';
       }
       if (data.broad_market && data.broad_market.nifty_change_pct !== undefined) {
         const nChg = data.broad_market.nifty_change_pct;
@@ -1001,14 +1031,18 @@
 
       const sSpotEl = document.getElementById('sensex-spot-val');
       const sChgEl = document.getElementById('sensex-change-val');
-      if (data.broad_market) {
-        const sLtp = data.broad_market.sensex_spot || 79450.0;
+      if (bmDataStatus === 'STALE') {
+        if (sSpotEl) sSpotEl.textContent = '-- (STALE)';
+      } else if (data.broad_market && data.broad_market.sensex_spot) {
+        const sLtp = data.broad_market.sensex_spot;
         const sChg = data.broad_market.sensex_change_pct !== undefined ? data.broad_market.sensex_change_pct : 0.0;
         if (sSpotEl) sSpotEl.textContent = Number(sLtp).toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
         if (sChgEl) {
           sChgEl.textContent = (sChg >= 0 ? '+' : '') + Number(sChg).toFixed(2) + '%';
           sChgEl.className = sChg >= 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold';
         }
+      } else {
+        if (sSpotEl) sSpotEl.textContent = '--';
       }
 
       // Dynamic Divergence Analysis Box

@@ -410,9 +410,10 @@ class MarketRegimeEngine:
             is_stale = (tick_age is not None and tick_age > 15.0) or (raw_data_status == "STALE")
             is_market_closed = False
 
+        # Nifty spot + 2,266+ NSE breadth + VWAP are the mandatory market inputs.
+        # Sensex spot is auxiliary: missing Sensex spot flags status PARTIAL, never fatal UNKNOWN.
         is_missing = (
             nifty_spot is None or
-            sensex_spot is None or
             not has_breadth
         )
 
@@ -639,8 +640,8 @@ class MarketRegimeEngine:
         pcr_val = float(deriv_info["index_options_pcr"]) if deriv_info.get("index_options_pcr") is not None else None
         fut_basis = float(deriv_info["nifty_futures_basis"]) if deriv_info.get("nifty_futures_basis") is not None else None
 
-        # If VIX is unavailable, flag data_status as PARTIAL without forcing regime to UNKNOWN
-        if vix_val is None and resolved_status == "OK":
+        # If VIX or Sensex spot is unavailable, flag data_status as PARTIAL without forcing regime to UNKNOWN
+        if (vix_val is None or sensex_spot is None) and resolved_status == "OK":
             resolved_status = "PARTIAL"
 
         # -------------------------------------------------------------
@@ -649,8 +650,17 @@ class MarketRegimeEngine:
         raw_score = 0.0
 
         # Pillar 1: Bluechip Benchmark Breadth (Max 40 points)
-        raw_score += (nifty_wabi * 20.0)
-        raw_score += (sensex_wabi * 10.0)
+        has_sensex_breadth = (
+            bool(sensex_breadth) and
+            sensex_breadth.get("status") not in ("NO_DATA", "UNAVAILABLE") and
+            (sensex_breadth.get("advances", 0) > 0 or sensex_breadth.get("declines", 0) > 0)
+        )
+        if has_sensex_breadth:
+            raw_score += (nifty_wabi * 20.0)
+            raw_score += (sensex_wabi * 10.0)
+        else:
+            # If Sensex constituent breadth is unavailable, scale the full 30 benchmark points to Nifty WABI
+            raw_score += (nifty_wabi * 30.0)
         hw_points_map = {5: 10.0, 4: 6.0, 3: 0.0, 2: -6.0, 1: -10.0, 0: -10.0}
         raw_score += hw_points_map.get(nifty_hw_above, 0.0)
 
@@ -712,7 +722,8 @@ class MarketRegimeEngine:
         # 2. DIVERGENCE VETO GUARD & HYSTERESIS REGIME CLASSIFICATION
         # -------------------------------------------------------------
         is_divergence = False
-        if (nifty_wabi >= 0.25 or sensex_wabi >= 0.25) and (bm_adr < 0.85 or bm_dec > bm_adv + 300):
+        sensex_wabi_bullish = (sensex_wabi >= 0.25) if has_sensex_breadth else False
+        if (nifty_wabi >= 0.25 or sensex_wabi_bullish) and (bm_adr < 0.85 or bm_dec > bm_adv + 300):
             is_divergence = True
 
         # Process through state manager (Hysteresis, Confirmation, Cooldown, Market Hours)
