@@ -220,7 +220,8 @@ class MarketScheduler:
 
             # 5. Compute Intraday Breadth Momentum Velocity (15m/30m delta)
             now_ts = datetime.datetime.now(tz=IST).timestamp()
-            current_above = float(self.latest_nifty_breadth.get("stocks_above_vwap_pct", 50.0))
+            raw_above = self.latest_nifty_breadth.get("stocks_above_vwap_pct") if self.latest_nifty_breadth else None
+            current_above = float(raw_above if raw_above is not None else 50.0)
             self._history_snapshots.append({"time": now_ts, "above_pct": current_above})
             # Keep history within last 45 minutes
             self._history_snapshots = [s for s in self._history_snapshots if now_ts - s["time"] <= 2700]
