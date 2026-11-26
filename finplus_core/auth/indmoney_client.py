@@ -25,6 +25,7 @@ import base64
 import datetime
 import json
 import os
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -175,6 +176,7 @@ class INDMoneyAuthClient:
         """Saves active token, expiry ISO string, and last_request_time to the shared token file."""
         if not self.token_file_path:
             return
+        tmp_path: Optional[str] = None
         try:
             self.token_file_path.parent.mkdir(parents=True, exist_ok=True)
             exp_dt = self.get_token_expiration(token)
@@ -184,10 +186,25 @@ class INDMoneyAuthClient:
                 "last_request_time": self._last_token_request_time,
                 "updated_at": datetime.datetime.now(tz=IST).isoformat(),
             }
-            with open(self.token_file_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=str(self.token_file_path.parent),
+                prefix=".tmp_token_",
+                suffix=".json",
+                delete=False,
+            ) as tmp_f:
+                json.dump(data, tmp_f, indent=2)
+                tmp_path = tmp_f.name
+            os.replace(tmp_path, self.token_file_path)
+            tmp_path = None
             logger.info("Persisted active token metadata to %s", self.token_file_path)
         except Exception as e:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
             logger.warning(f"Could not persist token file {self.token_file_path}: {e}")
 
     def get_cooldown_remaining(self) -> float:

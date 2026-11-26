@@ -65,7 +65,7 @@
 
       <!-- NTFY Quick Trigger & Topic Config -->
       <div class="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1 rounded-xl">
-        <input type="text" id="ntfy-topic-input" value="Finplus-Delta" title="Your NTFY Topic" class="bg-slate-950 text-emerald-400 text-xs px-2 py-1 rounded border border-slate-800 font-mono w-28 focus:outline-none focus:border-emerald-500" placeholder="Topic name">
+        <input type="text" id="ntfy-topic-input" value="Finplus-Breadth" title="Your NTFY Topic" class="bg-slate-950 text-emerald-400 text-xs px-2 py-1 rounded border border-slate-800 font-mono w-28 focus:outline-none focus:border-emerald-500" placeholder="Topic name">
         <button onclick="triggerCustomAlert()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-1.5 rounded-lg shadow transition active:scale-95 flex items-center gap-1">
           <span>📲 Test Push</span>
         </button>
@@ -1169,7 +1169,7 @@
     }
 
     async function triggerCustomAlert() {
-      const topic = document.getElementById('ntfy-topic-input').value.trim() || 'Finplus-Delta';
+      const topic = document.getElementById('ntfy-topic-input').value.trim() || 'Finplus-Breadth';
       try {
         const res = await fetch(`/api/trigger-test-alert?topic=${encodeURIComponent(topic)}`, { method: 'POST' });
         const json = await res.json();

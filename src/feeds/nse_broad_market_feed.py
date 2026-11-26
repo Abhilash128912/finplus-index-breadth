@@ -15,6 +15,7 @@ Fetches official exchange-wide breadth across ALL actively traded NSE equities (
 from __future__ import annotations
 
 import datetime
+import threading
 import time
 from typing import Any, Dict, Optional
 
@@ -111,6 +112,7 @@ class NSEBroadMarketFeed:
 
     def __init__(self) -> None:
         self.session = requests.Session()
+        self._session_lock = threading.RLock()
         self._last_cookie_time: float = 0.0
         self._cached_sensex_spot: Optional[float] = None
         self._cached_sensex_chg_pct: Optional[float] = None
@@ -202,19 +204,23 @@ class NSEBroadMarketFeed:
                     headers = self.auth_client.get_auth_headers()
                 except Exception:
                     token = self.auth_client.access_token or os.getenv("INDMONEY_ACCESS_TOKEN")
-                    auth_val = f"Bearer {token}" if token and not str(token).startswith("Bearer ") else token
-                    headers = {"Authorization": auth_val, "Accept": "application/json"}
+                    auth_val = str(token).removeprefix("Bearer ").strip() if token else None
+                    headers = {"Authorization": auth_val, "Accept": "application/json"} if auth_val else {}
             else:
                 token = os.getenv("INDMONEY_ACCESS_TOKEN") or os.getenv("INDSTOCKS_TOKEN")
-                auth_val = f"Bearer {token}" if token and not str(token).startswith("Bearer ") else token
-                headers = {"Authorization": auth_val, "Accept": "application/json"}
+                auth_val = str(token).removeprefix("Bearer ").strip() if token else None
+                headers = {"Authorization": auth_val, "Accept": "application/json"} if auth_val else {}
 
             if headers.get("Authorization"):
                 url = f"https://api.indstocks.com/market/quotes/full?scrip-codes={scrip_code}"
                 resp = requests.get(url, headers=headers, timeout=2.5)
                 if resp.status_code in (401, 403) and self.auth_client:
                     try:
-                        self.auth_client.get_valid_token(auto_refresh=True)
+                        self.auth_client.access_token = None
+                        if hasattr(self.auth_client, "force_refresh_token"):
+                            self.auth_client.force_refresh_token()
+                        else:
+                            self.auth_client.get_valid_token(auto_refresh=True)
                         headers = self.auth_client.get_auth_headers()
                         resp = requests.get(url, headers=headers, timeout=2.5)
                     except Exception:
@@ -315,8 +321,9 @@ class NSEBroadMarketFeed:
     def _prime_session(self) -> None:
         """Initializes tracking cookies with NSE."""
         try:
-            self.session.get(self.BASE_URL, headers=self.HEADERS, timeout=6)
-            self._last_cookie_time = datetime.datetime.now().timestamp()
+            with self._session_lock:
+                self.session.get(self.BASE_URL, headers=self.HEADERS, timeout=6)
+                self._last_cookie_time = datetime.datetime.now().timestamp()
         except Exception as exc:
             logger.warning("Failed to prime NSE session: %s", exc)
 
@@ -325,6 +332,10 @@ class NSEBroadMarketFeed:
         Fetches official broad market breadth across ALL active equities on the NSE exchange.
         Guarantees zero fabricated numbers: all data is direct from NSE APIs.
         """
+        with self._session_lock:
+            return self._fetch_broad_market_breadth_locked()
+
+    def _fetch_broad_market_breadth_locked(self) -> Dict[str, Any]:
         now_ts = datetime.datetime.now().timestamp()
         if now_ts - self._last_cookie_time > 600:
             self._prime_session()

@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import hmac
 import json
 import os
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 # Ensure root and src directories are in sys.path
@@ -32,9 +34,9 @@ except ImportError:
     import src as _src
     sys.modules["finplus_index_breadth"] = _src
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -46,18 +48,69 @@ from finplus_index_breadth.scheduler.market_scheduler import MarketScheduler
 
 logger = get_finplus_logger("APIServer")
 
+# Shared scheduler, connection manager, and main event loop reference
+scheduler = MarketScheduler()
+active_connections: List[WebSocket] = []
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+
+async def _broadcast_snapshot(data_str: str) -> None:
+    """Sends a serialized snapshot to all active WebSockets and prunes dead ones."""
+    dead: List[WebSocket] = []
+    for ws in list(active_connections):
+        try:
+            await ws.send_text(data_str)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        if ws in active_connections:
+            active_connections.remove(ws)
+
+
+def on_new_snapshot(snapshot: Dict[str, Any]) -> None:
+    """Dispatches new breadth snapshot to all connected WebSockets from any thread."""
+    if _main_loop is None or _main_loop.is_closed():
+        return
+    data_str = json.dumps(snapshot)
+    try:
+        asyncio.run_coroutine_threadsafe(_broadcast_snapshot(data_str), _main_loop)
+    except Exception:
+        pass
+
+
+scheduler.register_listener(on_new_snapshot)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Launches the background market poller on startup and stops it on shutdown."""
+    global _main_loop
+    _main_loop = asyncio.get_running_loop()
+    logger.info("Booting FinPlus+ Index Breadth Web Gateway...")
+    scheduler._task = asyncio.create_task(scheduler.run_loop())
+    try:
+        yield
+    finally:
+        logger.info("Shutting down FinPlus+ Index Breadth Web Gateway...")
+        scheduler.stop()
+        if scheduler._task and not scheduler._task.done():
+            scheduler._task.cancel()
+        _main_loop = None
+
+
 app = FastAPI(
     title="FinPlus+ Index Breadth & BTST Engine",
     version="1.0.0",
     docs_url="/docs",
     redoc_url=None,
+    lifespan=lifespan,
 )
 
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -73,37 +126,6 @@ async def add_cache_control_headers(request: Request, call_next):
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
-
-# Shared scheduler and connection manager
-scheduler = MarketScheduler()
-active_connections: List[WebSocket] = []
-
-
-def on_new_snapshot(snapshot: Dict[str, Any]) -> None:
-    """Dispatches new breadth snapshot to all connected WebSockets."""
-    data_str = json.dumps(snapshot)
-    for ws in list(active_connections):
-        try:
-            asyncio.create_task(ws.send_text(data_str))
-        except Exception:
-            pass
-
-
-scheduler.register_listener(on_new_snapshot)
-
-
-@app.on_event("startup")
-async def startup_event() -> None:
-    """Launches the background market poller upon server boot."""
-    logger.info("Booting FinPlus+ Index Breadth Web Gateway...")
-    # Launch background loop (executes first refresh asynchronously via worker thread)
-    scheduler._task = asyncio.create_task(scheduler.run_loop())
-
-
-@app.on_event("shutdown")
-def shutdown_event() -> None:
-    """Terminates background workers upon shutdown."""
-    scheduler.stop()
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
@@ -144,7 +166,7 @@ async def admin_set_token(request: Request) -> Dict[str, Any]:
     if not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized: Missing Bearer token")
     token = auth_header.split(" ", 1)[1].strip()
-    if token != admin_token:
+    if not hmac.compare_digest(token, admin_token):
         raise HTTPException(status_code=403, detail="Forbidden: Invalid ADMIN_TOKEN")
 
     try:
@@ -158,9 +180,10 @@ async def admin_set_token(request: Request) -> Dict[str, Any]:
                 from finplus_core.auth import INDMoneyAuthClient
                 scheduler.feed.auth_client = INDMoneyAuthClient(access_token=new_token, auth_role="client")
             auth_c = scheduler.feed.auth_client
-            auth_c.access_token = new_token
-            auth_c._save_token_to_file(new_token)
-            os.environ["INDMONEY_ACCESS_TOKEN"] = new_token
+            with auth_c._sync_refresh_lock:
+                auth_c.access_token = new_token
+                auth_c._save_token_to_file(new_token)
+                os.environ["INDMONEY_ACCESS_TOKEN"] = new_token
             ver = await asyncio.to_thread(auth_c.verify_connection)
             return {"status": "SUCCESS", "token_length": len(new_token), "verification": ver}
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": "feed not configured on scheduler"})
@@ -183,7 +206,7 @@ async def get_active_auth_token(request: Request) -> Dict[str, Any]:
         raise HTTPException(status_code=401, detail="Unauthorized: Missing Bearer token")
 
     token = auth_header.split(" ", 1)[1].strip()
-    if token != admin_token:
+    if not hmac.compare_digest(token, admin_token):
         raise HTTPException(status_code=403, detail="Forbidden: Invalid ADMIN_TOKEN")
 
     held_token = None
@@ -276,7 +299,7 @@ async def get_breadth_data() -> Dict[str, Any]:
 async def get_btst_status() -> Dict[str, Any]:
     """Returns the current BTST decision (evaluated strictly for Nifty/Sensex with exact ATM options)."""
     if not scheduler.latest_btst_result:
-        scheduler.refresh_breadth()
+        await asyncio.to_thread(scheduler.refresh_breadth)
     return scheduler.latest_btst_result
 
 
@@ -285,10 +308,8 @@ async def trigger_test_alert(mode: str = "both", topic: str = "") -> Dict[str, A
     """
     Manually triggers test push notifications to registered NTFY topics (Finplus-Delta & Finplus-Breadth).
     """
-    snapshot = scheduler.refresh_breadth()
-    dispatcher = scheduler.dispatcher
-    if topic:
-        dispatcher.topics = [topic]
+    snapshot = await asyncio.to_thread(scheduler.refresh_breadth)
+    dispatcher = NTFYDispatcher(topics=[topic]) if topic else scheduler.dispatcher
 
     dispatched = []
     if mode in ("pulse", "both"):

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import threading
 from typing import Any, Callable, Dict, List, Optional
 
 from finplus_core.utils.logger import get_finplus_logger
@@ -50,6 +51,7 @@ class MarketScheduler:
 
         self._running = False
         self._task: Optional[asyncio.Task] = None
+        self._refresh_lock = threading.Lock()
         self._last_pulse_slot: Optional[str] = None
         self._last_btst_slot: Optional[str] = None
         self._last_regime_label: Optional[str] = None
@@ -62,6 +64,10 @@ class MarketScheduler:
 
     def refresh_breadth(self) -> Dict[str, Any]:
         """Performs a synchronous breadth refresh cycle across ALL NSE stocks and constituents."""
+        with self._refresh_lock:
+            return self._refresh_breadth_locked()
+
+    def _refresh_breadth_locked(self) -> Dict[str, Any]:
         try:
             # 1. Fetch exchange-wide broad market breadth (ALL NSE Stocks)
             self.latest_broad_market = self.broad_feed.fetch_broad_market_breadth()

@@ -80,6 +80,21 @@ class INDMoneyMarketFeed:
         
         try:
             resp = requests.get(url, headers=headers, timeout=3.0)
+            if resp.status_code in (401, 403):
+                logger.warning("INDstocks quote returned HTTP %s. Refreshing token and retrying once...", resp.status_code)
+                try:
+                    self.auth_client.access_token = None
+                    if hasattr(self.auth_client, "force_refresh_token"):
+                        self.auth_client.force_refresh_token()
+                    else:
+                        self.auth_client.get_valid_token(auto_refresh=True)
+                    headers = self.auth_client.get_auth_headers()
+                    resp = requests.get(url, headers=headers, timeout=3.0)
+                except Exception as ref_err:
+                    logger.warning("Token refresh on HTTP %s failed (%s). Setting 120s cooldown.", resp.status_code, ref_err)
+                    self._broker_cooldown_until = now + 120.0
+                    return {}
+
             if resp.status_code == 200:
                 payload = resp.json()
                 return payload.get("data", {})
